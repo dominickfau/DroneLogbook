@@ -1,0 +1,20 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Convert UI Files to Python",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "./convert_ui.py",
+                "--input",
+                "${workspaceFolder}",
+                "--output",
+                "${workspaceFolder}"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}
