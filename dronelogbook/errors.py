@@ -65,3 +65,6 @@ class DeleteEquipmentError(Error):
 class DeleteDroneError(Error):
     """Raised when a drone can not be deleted from the database."""
     pass
+
+class UomConversionError(Error):
+    pass

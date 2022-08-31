@@ -1,98 +1,12 @@
-from __future__ import annotations
 import traceback
 import os
-from typing import Any
-from win32com.client import Dispatch
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from mainwindow import Ui_MainWindow
-import database
-import utilities
-import label_template_data
-from errors import *
+from dronelogbook.mainwindow import Ui_MainWindow
+from dronelogbook import enums, errors, config, models, dialogs
+from dronelogbook.dymo import DymoLabelPrinter
+from dronelogbook.customwidgets import SearchWidget
 
-from customwidgets import SearchWidget
-
-COMPANY_NAME = "DF-Software"
-PROGRAM_NAME = "Drone Logbook"
-VERSION = "0.1.0"
-
-USER_HOME_FOLDER = os.path.expanduser('~')
-COMPANY_FOLDER = os.path.join(USER_HOME_FOLDER, "Documents", COMPANY_NAME)
-PROGRAM_FOLDER = os.path.join(COMPANY_FOLDER, PROGRAM_NAME)
-LOG_FOLDER = os.path.join(PROGRAM_FOLDER, 'Logs')
-LABEL_TEMPLATE_FOLDER = os.path.join(PROGRAM_FOLDER, 'Label Templates')
-
-
-DUMPS_FOLDER = os.path.join(PROGRAM_FOLDER, 'Dumps')
-DATABASE_DUMPS_FOLDER = os.path.join(DUMPS_FOLDER, 'Database')
-
-THUMBNAIL_WIDTH = 400
-THUMBNAIL_HEIGHT = 250
-
-import dialogs
-
-if not os.path.exists(COMPANY_FOLDER):
-    os.mkdir(COMPANY_FOLDER)
-
-if not os.path.exists(PROGRAM_FOLDER):
-    os.makedirs(PROGRAM_FOLDER)
-
-if not os.path.exists(LABEL_TEMPLATE_FOLDER):
-    os.makedirs(LABEL_TEMPLATE_FOLDER)
-    with open(os.path.join(LABEL_TEMPLATE_FOLDER, label_template_data.INVENTORY_BARCODE_TEMPLATE["FileName"]), 'w') as f:
-        f.write(label_template_data.INVENTORY_BARCODE_TEMPLATE["Data"])
-
-if not os.path.exists(LOG_FOLDER):
-    os.makedirs(LOG_FOLDER)
-
-if not os.path.exists(DUMPS_FOLDER):
-    os.makedirs(DUMPS_FOLDER)
-
-if not os.path.exists(DATABASE_DUMPS_FOLDER):
-    os.makedirs(DATABASE_DUMPS_FOLDER)
-
-
-class DymoLabelPrinter:
-    def __init__(self) -> object:
-        self.printer_name = None
-        self.label_file_path = None
-        self.is_open = False
-        try:
-            self.printer_engine = Dispatch('Dymo.DymoAddIn')
-            self.label_engine = Dispatch('Dymo.DymoLabels')
-        except Exception as error:
-            if error.strerror == "Invalid class string":
-                raise MissingRequiredSoftwareError("Missing required software program. Please install DLS8Setup.8.7.exe.")
-
-        printers = self.printer_engine.GetDymoPrinters()
-        self.PRINTERS = [printer for printer in printers.split('|') if printer]
-
-    def __enter__(self):
-        self.printer_engine.StartPrintJob()
-        return self.printer_engine
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # Log the exception if one was raised
-        self.printer_engine.EndPrintJob()
-
-    def set_printer(self, printer_name: str):
-        if printer_name not in self.PRINTERS:
-            raise Exception('Printer not found')
-        self.printer_engine.SelectPrinter(printer_name)
-
-    def print_labels(self, copies: int = 1):
-        with self as label_engine:
-            label_engine.Print(copies, False)
-
-    def set_field(self, field_name: str, field_value: Any):
-        self.label_engine.SetField(field_name, field_value)
-
-    def register_label_file(self, label_file_path: str) -> object:
-        self.label_file_path = label_file_path
-        self.is_open = self.printer_engine.Open(label_file_path)
-        if not self.is_open:
-            raise SetLabelFileError('Could not open label file.')
 
 
 class MainWindow(Ui_MainWindow):
@@ -101,17 +15,15 @@ class MainWindow(Ui_MainWindow):
     def __init__(self, parent=None):
         super().__init__()
         self.setupUi(self)
-        self.setWindowTitle(f"{PROGRAM_NAME} v{VERSION}")
+        self.setWindowTitle(f"{config.PROGRAM_NAME} v{config.VERSION}")
 
         self.drone_info_tabwidget.setEnabled(False)
         self.batteries_info_groupbox.setEnabled(False)
         self.equipment_info_groupbox.setEnabled(False)
         self.flights_info_tabwidget.setEnabled(False)
 
-        self.settings = QtCore.QSettings(COMPANY_NAME, PROGRAM_NAME)
+        self.settings = QtCore.QSettings(config.COMPANY_NAME, config.PROGRAM_NAME)
         self.load_settings()
-
-        self.label_printing_enabled = True
 
         columns = [
             "Serial Number",
@@ -199,14 +111,13 @@ class MainWindow(Ui_MainWindow):
         self.flight_controller_search_widget.add_search_form_field("Name:", self.search_flight_controller_name_line_edit)
         self.flight_controller_search_widget.add_search_form_field("Status:", self.search_flight_controller_status_combobox)
 
-        try:
-            self.label_printer = DymoLabelPrinter()
-        except MissingRequiredSoftwareError as error:
-            self.label_printing_enabled = False
-            self.label_printer = None
-            print(error)
+        self.label_printer = None
 
-        if self.label_printing_enabled:
+        if config.LABEL_PRINTING_ENABLED:
+            try:
+                self.label_printer = DymoLabelPrinter()
+            except errors.MissingRequiredSoftwareError:
+                pass
             if self.default_printer == "":
                 if len(self.label_printer.PRINTERS) == 1:
                     self.default_printer = self.label_printer.PRINTERS[0]
@@ -228,7 +139,7 @@ class MainWindow(Ui_MainWindow):
     
     def load_label_file_settings(self) -> None:
         self.settings.beginGroup("Label Files")
-        self.inventory_label_file_path = self.settings.value("inventory_label_file_path", os.path.join(LABEL_TEMPLATE_FOLDER, label_template_data.INVENTORY_BARCODE_TEMPLATE["FileName"]))
+        self.inventory_label_file_path = self.settings.value("inventory_label_file_path", os.path.join(config.LABEL_TEMPLATE_FOLDER, config.INVENTORY_BARCODE_TEMPLATE["FileName"]))
         self.settings.endGroup()
     
     def save_settings(self) -> None:
@@ -289,13 +200,13 @@ class MainWindow(Ui_MainWindow):
 
     def init_form_data(self):
         """Initializes the form data."""
-        self._populate_combobox(self.search_drone_status_combobox, database.Airworthyness.all(), add_blank=True)
-        self._populate_combobox(self.search_battery_status_combobox, database.Airworthyness.all(), add_blank=True)
-        self._populate_combobox(self.search_flight_controller_status_combobox, database.Airworthyness.all(), add_blank=True)
-        self._populate_combobox(self.battery_status_combobox, database.Airworthyness.all())
-        self._populate_combobox(self.drone_battery_status_combobox, database.Airworthyness.all())
-        self._populate_combobox(self.drone_status_combobox, database.Airworthyness.all())
-        self._populate_combobox(self.flight_controller_status_combobox, database.Airworthyness.all())
+        self._populate_combobox(self.search_drone_status_combobox, enums.Airworthyness.all(), add_blank=True)
+        self._populate_combobox(self.search_battery_status_combobox, enums.Airworthyness.all(), add_blank=True)
+        self._populate_combobox(self.search_flight_controller_status_combobox, enums.Airworthyness.all(), add_blank=True)
+        self._populate_combobox(self.battery_status_combobox, enums.Airworthyness.all())
+        self._populate_combobox(self.drone_battery_status_combobox, enums.Airworthyness.all())
+        self._populate_combobox(self.drone_status_combobox, enums.Airworthyness.all())
+        self._populate_combobox(self.flight_controller_status_combobox, enums.Airworthyness.all())
         
         
         drones = database.global_session.query(database.Drone).all()
@@ -357,7 +268,7 @@ class MainWindow(Ui_MainWindow):
     
     def reload_drone_search_table(self, search_criteria=None) -> None:
         """Reloads the drone search table."""
-        self.drone_search_results = [] # type: list[database.Drone]
+        self.drone_search_results = [] # type: list[models.Drone]
 
         # TODO: Implement search criteria.
         if search_criteria:
@@ -381,7 +292,7 @@ class MainWindow(Ui_MainWindow):
         """Reloads the battery search table."""
 
         # TODO: Implement search criteria.
-        self.battery_search_results = [] # type: list[database.Battery]
+        self.battery_search_results = [] # type: List[models.Battery]
 
         if search_criteria:
             self.battery_search_results = database.global_session.query(database.Battery).all()
@@ -401,7 +312,7 @@ class MainWindow(Ui_MainWindow):
     
     def reload_flight_search_table(self, search_criteria=None) -> None:
         """Reloads the flight search table."""
-        self.flight_search_results = [] # type: list[database.Flight]
+        self.flight_search_results = [] # type: List[models.Flight]
 
         # TODO: Implement search criteria.
         if search_criteria:
@@ -422,7 +333,7 @@ class MainWindow(Ui_MainWindow):
     
     def reload_equipment_search_table(self, search_criteria=None) -> None:
         """Reloads the equipment search table."""
-        self.equipment_search_results = [] # type: list[database.Equipment]
+        self.equipment_search_results = [] # type: List[models.Equipment]
 
         # TODO: Implement search criteria.
         if search_criteria:
@@ -462,7 +373,7 @@ class MainWindow(Ui_MainWindow):
         
         self.flight_controller_search_widget.set_record_data(data)
     
-    def reload_flight_equipment_table(self, flight: database.Flight):
+    def reload_flight_equipment_table(self, flight: models.Flight):
         """Reloads the flight equipment table."""
         self.flight_equipment_table.setRowCount(0)
         for equipment_to_flight in flight.used_equipment:
@@ -482,7 +393,7 @@ class MainWindow(Ui_MainWindow):
             self.flight_equipment_edit_button.setEnabled(True)
             self.flight_equipment_remove_button.setEnabled(True)
     
-    def reload_drone_batteries_table(self, drone: database.Drone):
+    def reload_drone_batteries_table(self, drone: models.Drone):
         """Reloads the drone linked batteries table"""
         self.drone_batteries_table.setRowCount(0)
         for battery_to_drone in drone.batteries:
@@ -510,8 +421,10 @@ class MainWindow(Ui_MainWindow):
         
     def backup_database(self) -> None:
         """Backs up the database."""
+        # TODO: Implement this.
+        raise NotImplementedError()
         self.statusBar().showMessage("Backing up database...")
-        database.backup_database(DATABASE_DUMPS_FOLDER)
+        database.backup_database(config.DATABASE_DUMPS_FOLDER)
         self.statusBar().showMessage("Database backup complete.", 5000)
 
     def connect_signals(self):
@@ -554,31 +467,31 @@ class MainWindow(Ui_MainWindow):
         self.drone_delete_button.clicked.connect(self.delete_drone)
         self.drone_delete_button.setEnabled(False)
 
-        self.drone_name_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.name, self.drone_name_line_edit.text()))
-        self.drone_status_combobox.currentIndexChanged.connect(lambda: self.selected_drone.set_attribute(database.Drone.status, self.drone_status_combobox.currentText()))
-        self.drone_description_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.description, self.drone_description_line_edit.text()))
-        self.drone_serial_number_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.serial_number, self.drone_serial_number_line_edit.text()))
-        self.drone_model_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.model, self.drone_model_line_edit.text()))
-        self.drone_flight_controller_combobox.currentIndexChanged.connect(lambda: self.selected_drone.set_attribute(database.Drone.flight_controller_id, database.FlightController.find_by_combobox_name(self.drone_flight_controller_combobox.currentText()).id))
-        self.drone_color_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.color, self.drone_color_line_edit.text()))
-        self.drone_item_value_spinbox.valueChanged.connect(lambda: self.selected_drone.set_attribute(database.Drone.item_value, self.drone_item_value_spinbox.value()))
-        self.drone_date_purchased_date_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.purchase_date, self.drone_date_purchased_date_edit.date().toPyDate()))
-        self.drone_max_speed_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.max_speed, self.drone_max_speed_spinbox.value()))
-        self.drone_max_vertical_speed_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.max_vertical_speed, self.drone_max_vertical_speed_spinbox.value()))
-        self.drone_max_payload_weight_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.max_payload_weight, self.drone_max_payload_weight_spinbox.value()))
-        self.drone_weight_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.weight, self.drone_weight_spinbox.value()))
-        self.drone_max_service_interval_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(database.Drone.max_service_interval, self.drone_max_service_interval_spinbox.value()))
-        self.drone_geometry_combobox.currentIndexChanged.connect(lambda: self.selected_drone.set_attribute(database.Drone.geometry_id, database.DroneGeometry.find_by_name(self.drone_geometry_combobox.currentText()).id))
-        self.drone_battery_notes_plain_text_edit.textChanged.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.notes, self.drone_battery_notes_plain_text_edit.toPlainText()))
-        self.drone_battery_status_combobox.currentIndexChanged.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.status, self.drone_battery_status_combobox.currentText()))
-        self.drone_battery_capacity_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.capacity, self.drone_battery_capacity_spinbox.value()))
-        self.drone_battery_cell_count_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.cell_count, self.drone_battery_cell_count_spinbox.value()))
-        self.drone_battery_max_flight_time_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.max_flight_time, self.drone_battery_max_flight_time_spinbox.value()))
-        self.drone_battery_max_charge_cycles_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.max_charge_cycles, self.drone_battery_max_charge_cycles_spinbox.value()))
-        self.drone_battery_max_flight_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.max_flight, self.drone_battery_max_flight_spinbox.value()))
-        self.drone_battery_weight_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.weight, self.drone_battery_weight_spinbox.value()))
-        self.drone_battery_item_value_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.item_value, self.drone_battery_item_value_spinbox.value()))
-        self.drone_battery_date_purchased_date_edit.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(database.Battery.purchase_date, self.drone_battery_date_purchased_date_edit.date().toPyDate()))
+        # self.drone_name_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.name, self.drone_name_line_edit.text()))
+        # self.drone_status_combobox.currentIndexChanged.connect(lambda: self.selected_drone.set_attribute(models.Drone.status, self.drone_status_combobox.currentText()))
+        # self.drone_description_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.description, self.drone_description_line_edit.text()))
+        # self.drone_serial_number_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.serial_number, self.drone_serial_number_line_edit.text()))
+        # self.drone_model_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.model, self.drone_model_line_edit.text()))
+        # self.drone_flight_controller_combobox.currentIndexChanged.connect(lambda: self.selected_drone.set_attribute(models.Drone.flight_controller_id, models.FlightController.find_by_combobox_name(self.drone_flight_controller_combobox.currentText()).id))
+        # self.drone_color_line_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.color, self.drone_color_line_edit.text()))
+        # self.drone_item_value_spinbox.valueChanged.connect(lambda: self.selected_drone.set_attribute(models.Drone.item_value, self.drone_item_value_spinbox.value()))
+        # self.drone_date_purchased_date_edit.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.purchase_date, self.drone_date_purchased_date_edit.date().toPyDate()))
+        # self.drone_max_speed_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.max_speed, self.drone_max_speed_spinbox.value()))
+        # self.drone_max_vertical_speed_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.max_vertical_speed, self.drone_max_vertical_speed_spinbox.value()))
+        # self.drone_max_payload_weight_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.max_payload_weight, self.drone_max_payload_weight_spinbox.value()))
+        # self.drone_weight_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.weight, self.drone_weight_spinbox.value()))
+        # self.drone_max_service_interval_spinbox.editingFinished.connect(lambda: self.selected_drone.set_attribute(models.Drone.max_service_interval, self.drone_max_service_interval_spinbox.value()))
+        # self.drone_geometry_combobox.currentIndexChanged.connect(lambda: self.selected_drone.set_attribute(models.Drone.geometry_id, models.DroneGeometry.find_by_name(self.drone_geometry_combobox.currentText()).id))
+        # self.drone_battery_notes_plain_text_edit.textChanged.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.notes, self.drone_battery_notes_plain_text_edit.toPlainText()))
+        # self.drone_battery_status_combobox.currentIndexChanged.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.status, self.drone_battery_status_combobox.currentText()))
+        # self.drone_battery_capacity_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.capacity, self.drone_battery_capacity_spinbox.value()))
+        # self.drone_battery_cell_count_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.cell_count, self.drone_battery_cell_count_spinbox.value()))
+        # self.drone_battery_max_flight_time_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.max_flight_time, self.drone_battery_max_flight_time_spinbox.value()))
+        # self.drone_battery_max_charge_cycles_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.max_charge_cycles, self.drone_battery_max_charge_cycles_spinbox.value()))
+        # self.drone_battery_max_flight_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.max_flight, self.drone_battery_max_flight_spinbox.value()))
+        # self.drone_battery_weight_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.weight, self.drone_battery_weight_spinbox.value()))
+        # self.drone_battery_item_value_spinbox.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.item_value, self.drone_battery_item_value_spinbox.value()))
+        # self.drone_battery_date_purchased_date_edit.editingFinished.connect(lambda: self.selected_drone_battery.set_attribute(models.Battery.purchase_date, self.drone_battery_date_purchased_date_edit.date().toPyDate()))
         self.drone_batteries_table.itemDoubleClicked.connect(self.on_drone_batteries_table_item_double_clicked)
         self.drone_battery_create_new_button.clicked.connect(self.on_drone_battery_create_new_button_clicked)
         self.drone_battery_add_button.clicked.connect(self.on_drone_battery_add_button_clicked)
@@ -595,19 +508,19 @@ class MainWindow(Ui_MainWindow):
         self.battery_delete_button.clicked.connect(self.delete_battery)
         self.battery_delete_button.setEnabled(False)
 
-        self.battery_status_combobox.currentIndexChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.status, self.battery_status_combobox.currentText()))
-        self.battery_capacity_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.capacity, self.battery_capacity_spinbox.value()))
-        self.battery_cell_count_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.cell_count, self.battery_cell_count_spinbox.value()))
-        self.battery_max_flight_time_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.max_flight_time, self.battery_max_flight_time_spinbox.value()))
-        self.battery_max_charge_cycles_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.max_charge_cycles, self.battery_max_charge_cycles_spinbox.value()))
-        self.battery_max_flight_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.max_flights, self.battery_max_flight_spinbox.value()))
-        self.battery_weight_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.weight, self.battery_weight_spinbox.value()))
-        self.battery_serial_number_line_edit.editingFinished.connect(lambda: self.selected_battery.set_attribute(database.Battery.serial_number, self.battery_serial_number_line_edit.text()))
-        self.battery_chemistry_combobox.currentIndexChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.chemistry_id, database.BatteryChemistry.find_by_combobox_name(self.battery_chemistry_combobox.currentText()).id))
-        self.battery_name_line_edit.editingFinished.connect(lambda: self.selected_battery.set_attribute(database.Battery.name, self.battery_name_line_edit.text()))
-        self.battery_item_value_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.item_value, self.battery_item_value_spinbox.value()))
-        self.battery_date_purchased_date_edit.dateChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.purchase_date, self.battery_date_purchased_date_edit.date().toPyDate()))
-        self.battery_notes_plain_text_edit.textChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.notes, self.battery_notes_plain_text_edit.toPlainText()))
+        # self.battery_status_combobox.currentIndexChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.status, self.battery_status_combobox.currentText()))
+        # self.battery_capacity_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.capacity, self.battery_capacity_spinbox.value()))
+        # self.battery_cell_count_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.cell_count, self.battery_cell_count_spinbox.value()))
+        # self.battery_max_flight_time_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.max_flight_time, self.battery_max_flight_time_spinbox.value()))
+        # self.battery_max_charge_cycles_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.max_charge_cycles, self.battery_max_charge_cycles_spinbox.value()))
+        # self.battery_max_flight_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.max_flights, self.battery_max_flight_spinbox.value()))
+        # self.battery_weight_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.weight, self.battery_weight_spinbox.value()))
+        # self.battery_serial_number_line_edit.editingFinished.connect(lambda: self.selected_battery.set_attribute(database.Battery.serial_number, self.battery_serial_number_line_edit.text()))
+        # self.battery_chemistry_combobox.currentIndexChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.chemistry_id, database.BatteryChemistry.find_by_combobox_name(self.battery_chemistry_combobox.currentText()).id))
+        # self.battery_name_line_edit.editingFinished.connect(lambda: self.selected_battery.set_attribute(database.Battery.name, self.battery_name_line_edit.text()))
+        # self.battery_item_value_spinbox.valueChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.item_value, self.battery_item_value_spinbox.value()))
+        # self.battery_date_purchased_date_edit.dateChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.purchase_date, self.battery_date_purchased_date_edit.date().toPyDate()))
+        # self.battery_notes_plain_text_edit.textChanged.connect(lambda: self.selected_battery.set_attribute(database.Battery.notes, self.battery_notes_plain_text_edit.toPlainText()))
 
         # Equipment tab
         self.equipment_search_widget.search_button.clicked.connect(self.on_search_equipment_button_clicked)
@@ -620,14 +533,14 @@ class MainWindow(Ui_MainWindow):
         self.equipment_delete_button.clicked.connect(self.delete_equipment)
         self.equipment_delete_button.setEnabled(False)
 
-        self.equipment_serial_number_line_edit.editingFinished.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.serial_number, self.equipment_serial_number_line_edit.text()))
-        self.equipment_name_line_edit.editingFinished.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.name, self.equipment_name_line_edit.text()))
-        self.equipment_description_line_edit.editingFinished.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.description, self.equipment_description_line_edit.text()))
-        self.equipment_type_combobox.currentIndexChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.type_id, database.EquipmentType.find_by_name(self.equipment_type_combobox.currentText()).id))
-        self.equipment_status_combobox.currentIndexChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.status, self.equipment_status_combobox.currentText()))
-        self.equipment_weight_spinbox.valueChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.weight, self.equipment_weight_spinbox.value()))
-        self.equipment_date_purchased_date_edit.dateChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.purchase_date, self.equipment_date_purchased_date_edit.date().toPyDate()))
-        self.equipment_item_value_spinbox.valueChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.item_value, self.equipment_item_value_spinbox.value()))
+        # self.equipment_serial_number_line_edit.editingFinished.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.serial_number, self.equipment_serial_number_line_edit.text()))
+        # self.equipment_name_line_edit.editingFinished.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.name, self.equipment_name_line_edit.text()))
+        # self.equipment_description_line_edit.editingFinished.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.description, self.equipment_description_line_edit.text()))
+        # self.equipment_type_combobox.currentIndexChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.type_id, database.EquipmentType.find_by_name(self.equipment_type_combobox.currentText()).id))
+        # self.equipment_status_combobox.currentIndexChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.status, self.equipment_status_combobox.currentText()))
+        # self.equipment_weight_spinbox.valueChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.weight, self.equipment_weight_spinbox.value()))
+        # self.equipment_date_purchased_date_edit.dateChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.purchase_date, self.equipment_date_purchased_date_edit.date().toPyDate()))
+        # self.equipment_item_value_spinbox.valueChanged.connect(lambda: self.selected_equipment.set_attribute(database.Equipment.item_value, self.equipment_item_value_spinbox.value()))
 
         # Flight Contoller tab
         self.flight_controller_search_widget.search_button.clicked.connect(self.on_search_flight_controller_button_clicked)
@@ -640,11 +553,11 @@ class MainWindow(Ui_MainWindow):
         self.flight_controller_delete_button.clicked.connect(self.delete_flight_controller)
         self.flight_controller_delete_button.setEnabled(False)
 
-        self.flight_controller_serial_number_line_edit.editingFinished.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.serial_number, self.flight_controller_serial_number_line_edit.text()))
-        self.flight_controller_name_line_edit.editingFinished.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.name, self.flight_controller_name_line_edit.text()))
-        self.flight_controller_status_combobox.currentIndexChanged.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.status, self.flight_controller_status_combobox.currentText()))
-        self.flight_controller_date_purchased_date_edit.dateChanged.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.purchase_date, self.flight_controller_date_purchased_date_edit.date().toPyDate()))
-        self.flight_controller_item_value_spinbox.valueChanged.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.item_value, self.flight_controller_item_value_spinbox.value()))
+        # self.flight_controller_serial_number_line_edit.editingFinished.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.serial_number, self.flight_controller_serial_number_line_edit.text()))
+        # self.flight_controller_name_line_edit.editingFinished.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.name, self.flight_controller_name_line_edit.text()))
+        # self.flight_controller_status_combobox.currentIndexChanged.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.status, self.flight_controller_status_combobox.currentText()))
+        # self.flight_controller_date_purchased_date_edit.dateChanged.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.purchase_date, self.flight_controller_date_purchased_date_edit.date().toPyDate()))
+        # self.flight_controller_item_value_spinbox.valueChanged.connect(lambda: self.selected_flight_controller.set_attribute(database.FlightController.item_value, self.flight_controller_item_value_spinbox.value()))
 
 
         # Flight tab
@@ -657,40 +570,40 @@ class MainWindow(Ui_MainWindow):
         self.flight_add_button.clicked.connect(self.add_flight)
         self.flight_delete_button.clicked.connect(self.delete_flight)
 
-        self.flight_name_line_edit.editingFinished.connect(lambda: self.selected_flight.set_attribute(database.Flight.name, self.flight_name_line_edit.text()))
-        self.flight_external_case_id_line_edit.editingFinished.connect(lambda: self.selected_flight.set_attribute(database.Flight.external_case_id, self.flight_external_case_id_line_edit.text()))
-        self.night_flight_checkbox.stateChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.night_flight, self.night_flight_checkbox.isChecked()))
-        self.flight_active_checkbox.stateChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.active, self.flight_active_checkbox.isChecked()))
-        self.flight_active_checkbox.setToolTip(database.Flight.active.doc)
-        self.flight_date_datetimeedit.dateTimeChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.date, self.flight_date_datetimeedit.dateTime().toPyDateTime()))
-        self.flight_duration_spinbox.valueChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.duration, self.flight_duration_spinbox.value()))
-        self.flight_type_combbox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.type_id, database.FlightType.find_by_name(self.flight_type_combbox.currentText()).id))
-        self.flight_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.notes, self.flight_notes_plaintextedit.toPlainText()))
-        self.flight_battery_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.battery_notes, self.flight_battery_notes_plaintextedit.toPlainText()))
-        self.flight_in_flight_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.in_flight_notes, self.flight_in_flight_notes_plaintextedit.toPlainText()))
-        self.flight_post_flight_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.post_flight_notes, self.flight_post_flight_notes_plaintextedit.toPlainText()))
-        self.flight_operation_type_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.operation_type_id, database.FlightOperationType.find_by_name(self.flight_operation_type_combobox.currentText()).id))
-        self.flight_utm_authorization_line_edit.editingFinished.connect(lambda: self.selected_flight.set_attribute(database.Flight.utm_authorization, self.flight_utm_authorization_line_edit.text()))
-        self.flight_operation_aproval_type_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.operation_approval_id, database.FlightOperationApproval.find_by_name(self.flight_operation_aproval_type_combobox.currentText()).id))
-        self.flight_legal_rule_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.legal_rule_id, database.LegalRule.find_by_name(self.flight_legal_rule_combobox.currentText()).id))
-        self.flight_legal_rule_details_line_edit.editingFinished.connect(lambda: self.selected_flight.set_attribute(database.Flight.legal_rule_details, self.flight_legal_rule_details_line_edit.text()))
-        self.flight_max_altitude_spinbox.valueChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.max_altitude, self.flight_max_altitude_spinbox.value()))
-        self.flight_distance_traveled_spinbox.valueChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.distance_traveled, self.flight_distance_traveled_spinbox.value()))
-        self.flight_drone_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.drone_id, database.Drone.find_by_combobox_name(self.flight_drone_combobox.currentText()).id))
-        self.flight_battery_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.battery_id, database.Battery.find_by_combobox_name(self.flight_battery_combobox.currentText()).id))
+        # self.flight_name_line_edit.editingFinished.connect(lambda: self.selected_flight.set_attribute(database.Flight.name, self.flight_name_line_edit.text()))
+        # self.flight_external_case_id_line_edit.editingFinished.connect(lambda: self.selected_flight.set_attribute(database.Flight.external_case_id, self.flight_external_case_id_line_edit.text()))
+        # self.night_flight_checkbox.stateChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.night_flight, self.night_flight_checkbox.isChecked()))
+        # self.flight_active_checkbox.stateChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.active, self.flight_active_checkbox.isChecked()))
+        self.flight_active_checkbox.setToolTip(models.Flight.active.doc)
+        # self.flight_date_datetimeedit.dateTimeChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.date, self.flight_date_datetimeedit.dateTime().toPyDateTime()))
+        # self.flight_duration_spinbox.valueChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.duration, self.flight_duration_spinbox.value()))
+        # self.flight_type_combbox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.type_id, database.FlightType.find_by_name(self.flight_type_combbox.currentText()).id))
+        # self.flight_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.notes, self.flight_notes_plaintextedit.toPlainText()))
+        # self.flight_battery_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.battery_notes, self.flight_battery_notes_plaintextedit.toPlainText()))
+        # self.flight_in_flight_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.in_flight_notes, self.flight_in_flight_notes_plaintextedit.toPlainText()))
+        # self.flight_post_flight_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.post_flight_notes, self.flight_post_flight_notes_plaintextedit.toPlainText()))
+        # self.flight_operation_type_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.operation_type_id, database.FlightOperationType.find_by_name(self.flight_operation_type_combobox.currentText()).id))
+        # self.flight_utm_authorization_line_edit.editingFinished.connect(lambda: self.selected_flight.set_attribute(database.Flight.utm_authorization, self.flight_utm_authorization_line_edit.text()))
+        # self.flight_operation_aproval_type_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.operation_approval_id, database.FlightOperationApproval.find_by_name(self.flight_operation_aproval_type_combobox.currentText()).id))
+        # self.flight_legal_rule_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.legal_rule_id, database.LegalRule.find_by_name(self.flight_legal_rule_combobox.currentText()).id))
+        # self.flight_legal_rule_details_line_edit.editingFinished.connect(lambda: self.selected_flight.set_attribute(database.Flight.legal_rule_details, self.flight_legal_rule_details_line_edit.text()))
+        # self.flight_max_altitude_spinbox.valueChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.max_altitude, self.flight_max_altitude_spinbox.value()))
+        # self.flight_distance_traveled_spinbox.valueChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.distance_traveled, self.flight_distance_traveled_spinbox.value()))
+        # self.flight_drone_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.drone_id, database.Drone.find_by_combobox_name(self.flight_drone_combobox.currentText()).id))
+        # self.flight_battery_combobox.currentIndexChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.battery_id, database.Battery.find_by_combobox_name(self.flight_battery_combobox.currentText()).id))
         self.flight_equipment_add_button.clicked.connect(self.on_flight_equipment_add_button_clicked)
         self.flight_equipment_edit_button.clicked.connect(self.on_flight_equipment_edit_button_clicked)
         self.flight_equipment_remove_button.clicked.connect(self.on_flight_equipment_remove_button_clicked)
 
 
-        self.flight_encounter_with_law_checkbox.stateChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.encounter_with_law, self.flight_encounter_with_law_checkbox.isChecked()))
+        # self.flight_encounter_with_law_checkbox.stateChanged.connect(lambda: self.selected_flight.set_attribute(database.Flight.encounter_with_law, self.flight_encounter_with_law_checkbox.isChecked()))
 
-        self.flight_weather_cloud_cover_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.cloud_cover, self.flight_weather_cloud_cover_spinbox.value()))
-        self.flight_weather_humidity_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.humidity, self.flight_weather_humidity_spinbox.value()))
-        self.flight_weather_temperature_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.temperature, self.flight_weather_temperature_spinbox.value()))
-        self.flight_weather_wind_speed_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.wind_speed, self.flight_weather_wind_speed_spinbox.value()))
-        self.flight_weather_wind_direction_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.wind_direction, self.flight_weather_wind_direction_spinbox.value()))
-        self.flight_weather_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.notes, self.flight_weather_notes_plaintextedit.toPlainText()))
+        # self.flight_weather_cloud_cover_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.cloud_cover, self.flight_weather_cloud_cover_spinbox.value()))
+        # self.flight_weather_humidity_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.humidity, self.flight_weather_humidity_spinbox.value()))
+        # self.flight_weather_temperature_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.temperature, self.flight_weather_temperature_spinbox.value()))
+        # self.flight_weather_wind_speed_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.wind_speed, self.flight_weather_wind_speed_spinbox.value()))
+        # self.flight_weather_wind_direction_spinbox.valueChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.wind_direction, self.flight_weather_wind_direction_spinbox.value()))
+        # self.flight_weather_notes_plaintextedit.textChanged.connect(lambda: self.selected_flight.weather.set_attribute(database.Weather.notes, self.flight_weather_notes_plaintextedit.toPlainText()))
     
     def on_splitter_moved(self, pos, index):
         splitter = self.sender()
@@ -701,11 +614,11 @@ class MainWindow(Ui_MainWindow):
 
     def on_drone_geometry_combobox_changed(self, index: int) -> None:
         name = self.drone_geometry_combobox.itemText(index)
-        self.geometry = database.DroneGeometry.find_by_name(name) # type: database.DroneGeometry
+        self.geometry = models.DroneGeometry.find_by_name(name) # type: models.DroneGeometry
         if self.geometry is None: return
         image = self.geometry.image
         qimage = image.to_QImage()
-        qimage = qimage.scaled(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, QtCore.Qt.KeepAspectRatio) # Scale the image
+        qimage = qimage.scaled(config.THUMBNAIL_WIDTH, config.THUMBNAIL_HEIGHT, QtCore.Qt.KeepAspectRatio) # Scale the image
         pixmap = QtGui.QPixmap.fromImage(qimage)
         self.drone_geometry_image.setPixmap(pixmap)
 
@@ -718,8 +631,7 @@ class MainWindow(Ui_MainWindow):
             self.reload_drone_form(self.selected_drone)
     
     def on_drone_battery_add_button_clicked(self) -> None:
-        batteries = [battery_to_drone.battery for battery_to_drone in self.selected_drone.batteries]
-        dialog = dialogs.SelectBatteryDialog(current_batteries=batteries, parent=self)
+        dialog = dialogs.SelectBatteryDialog(current_batteries=self.selected_drone.batteries, parent=self)
         dialog.exec()
         battery = dialog.battery
         if battery is not None:
@@ -947,7 +859,7 @@ class MainWindow(Ui_MainWindow):
         self.drone_info_tabwidget.setEnabled(True)
         self.drone_delete_button.setEnabled(True)
 
-        if self.label_printing_enabled:
+        if config.LABEL_PRINTING_ENABLED:
             self.drone_print_inventory_label_button.setEnabled(True)
 
         self.selected_drone_battery = drone.batteries[0].battery
@@ -1010,7 +922,7 @@ class MainWindow(Ui_MainWindow):
         self.batteries_info_groupbox.setEnabled(True)
         self.battery_delete_button.setEnabled(True)
 
-        if self.label_printing_enabled:
+        if config.LABEL_PRINTING_ENABLED:
             self.battery_print_inventory_label_button.setEnabled(True)
 
         self.battery_date_created_value.setText(battery.date_created.strftime("%Y-%m-%d"))
@@ -1057,7 +969,7 @@ class MainWindow(Ui_MainWindow):
 
         self.equipment_info_groupbox.setEnabled(True)
 
-        if self.label_printing_enabled:
+        if config.LABEL_PRINTING_ENABLED:
             self.equipment_print_inventory_label_button.setEnabled(True)
         
         self.equipment_date_created_value.setText(equipment.date_created.strftime("%Y-%m-%d"))
@@ -1087,7 +999,7 @@ class MainWindow(Ui_MainWindow):
         self.flight_controller_info_groupbox.setEnabled(True)
         self.flight_controller_delete_button.setEnabled(True)
 
-        if self.label_printing_enabled:
+        if config.LABEL_PRINTING_ENABLED:
             self.flight_controller_print_inventory_label_button.setEnabled(True)
 
         self.flight_controller_date_created_value.setText(flight_controller.date_created.strftime("%Y-%m-%d"))
@@ -1123,7 +1035,7 @@ class MainWindow(Ui_MainWindow):
         self.flights_info_tabwidget.setEnabled(True)
         self.flight_delete_button.setEnabled(True)
 
-        if self.label_printing_enabled:
+        if config.LABEL_PRINTING_ENABLED:
             self.flight_print_inventory_label_button.setEnabled(True)
 
         # General tab
@@ -1476,13 +1388,14 @@ class Application(QtWidgets.QApplication):
 
         # TODO: Work on splash screen
         self.splash = SplashScreen()
-        # self.splash.closing.connect(lambda: self.main_window.show())
-        self.splash.closing.connect(lambda: self.main_window.showMaximized())
+        self.splash.closing.connect(lambda: self.main_window.show())
+        # self.splash.closing.connect(lambda: self.main_window.showMaximized())
         self.splash.show()
         self.splash.loading()
         
 
 
 if __name__ == "__main__":
+    database.force_recreate()
     app = Application([])
     app.exec_()
