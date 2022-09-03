@@ -1,3 +1,4 @@
+from abc import abstractmethod, abstractstaticmethod
 import os
 import bcrypt
 import base64
@@ -40,6 +41,10 @@ class ImageData:
     """File extention without dot"""
     data: bytes
 
+    @property
+    def database_name(self) -> str:
+        return self.file_name.replace("_", " ")
+
 
 class Base(DeclarativeBase):
     __abstract__ = True
@@ -60,11 +65,13 @@ class Status(Base):
     def __str__(self) -> str:
         return self.name
     
-    def find_by_id(self, session: Session, id_: int) -> Optional['Status']:
-        return session.query(self.__class__).filter_by(id=id_).first()
+    @abstractstaticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['Status']:
+        pass
     
-    def find_by_name(self, session: Session, name: str) -> Optional['Status']:
-        return session.query(self.__class__).filter_by(name=name).first()
+    @abstractstaticmethod
+    def find_by_name(session: Session, name: str) -> Optional['Status']:
+        pass
 
 
 class Type_(Base):
@@ -78,13 +85,13 @@ class Type_(Base):
     def __str__(self) -> str:
         return self.name
     
-    @classmethod
-    def find_by_id(cls, session: Session, id_: int) -> Optional['Status']:
-        return session.query(cls.__class__).filter_by(id=id_).first()
+    @abstractmethod
+    def find_by_id(self, session: Session, id_: int) -> Optional['Type_']:
+        pass
     
-    @classmethod
-    def find_by_name(cls, session: Session, name: str) -> Optional['Status']:
-        return session.query(cls.__class__).filter_by(name=name).first()
+    @abstractmethod
+    def find_by_name(self, session: Session, name: str) -> Optional['Type_']:
+        pass
 
 
 class User(Base):
@@ -197,6 +204,14 @@ class LegalRule(Type_):
     """Represents a legal rule that applies to a flight."""
     __tablename__ = "legal_rule"
 
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['LegalRule']:
+        return session.query(LegalRule).filter_by(id=id_).first()
+    
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['LegalRule']:
+        return session.query(LegalRule).filter_by(name=name).first()
+
 
 class EquipmentType(Type_):
     """Represents a type of equipment."""
@@ -204,14 +219,39 @@ class EquipmentType(Type_):
 
     group = Column(Enum(enums.EquipmentGroup), nullable=False) # type: enums.EquipmentGroup
 
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['EquipmentType']:
+        return session.query(EquipmentType).filter_by(id=id_).first()
+    
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['EquipmentType']:
+        return session.query(EquipmentType).filter_by(name=name).first()
+
 
 class MaintenanceStatus(Status):
     __tablename__ = "maintenance_status"
+
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['MaintenanceStatus']:
+        return session.query(MaintenanceStatus).filter_by(id=id_).first()
+    
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['MaintenanceStatus']:
+        return session.query(MaintenanceStatus).filter_by(name=name).first()
 
 
 class MaintenanceTaskStatus(Status):
     """Represents the status of a maintenance task."""
     __tablename__ = "maintenance_task_status"
+
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['MaintenanceTaskStatus']:
+        return session.query(MaintenanceTaskStatus).filter_by(id=id_).first()
+    
+
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['MaintenanceTaskStatus']:
+        return session.query(MaintenanceTaskStatus).filter_by(name=name).first()
 
 
 class UomConversion(DeclarativeBase):
@@ -395,7 +435,15 @@ class FlightOperationApproval(Type_):
     description = Column(String(256), nullable=False)
 
     # Relationships
-    flight_operation_types = relationship("FlightOperationType", secondary=flight_operation_type_to_approval_table) # type: List[FlightOperationType]
+    flight_operation_types = relationship("FlightOperationType", secondary=flight_operation_type_to_approval_table, back_populates="approvals") # type: List[FlightOperationType]
+
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['FlightOperationApproval']:
+        return session.query(FlightOperationApproval).filter_by(id=id_).first()
+    
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['FlightOperationApproval']:
+        return session.query(FlightOperationApproval).filter_by(name=name).first()
 
 
 class FlightOperationType(Status):
@@ -405,7 +453,15 @@ class FlightOperationType(Status):
     description = Column(String(256), nullable=False)
 
     # Relationships
-    approvals = relationship("FlightOperationApproval", secondary=flight_operation_type_to_approval_table) # type: List[FlightOperationApproval]
+    approvals = relationship("FlightOperationApproval", secondary=flight_operation_type_to_approval_table, back_populates="flight_operation_types") # type: List[FlightOperationApproval]
+
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['FlightOperationType']:
+        return session.query(FlightOperationType).filter_by(id=id_).first()
+    
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['FlightOperationType']:
+        return session.query(FlightOperationType).filter_by(name=name).first()
 
 
 class FlightType(Base):
@@ -423,65 +479,13 @@ class FlightStatus(Status):
     """Represents the status of a flight."""
     __tablename__ = "flight_status"
 
-
-# class FlightController(Base):
-#     """Represents a flight controller."""
-#     __tablename__ = "flight_controller"
-
-#     serial_number = Column(String(256), unique=True)
-#     name = Column(String(50))
-#     purchase_date = Column(DateTime, default=datetime.now)
-#     status = Column(Enum(enums.Airworthyness), default=enums.Airworthyness.Airworthy) # type: enums.Airworthyness
-#     price = Column(Float, default=0.00)
-#     """Flight controller's value in US dollars."""
-#     last_flight_date = Column(DateTime)
-#     last_flight_duration = Column(Float)
-#     """Duration of the last flight in minutes."""
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['FlightStatus']:
+        return session.query(FlightStatus).filter_by(id=id_).first()
     
-#     drone = relationship("Drone", uselist=False, back_populates="flight_controller") # type: Drone
-
-#     @staticmethod
-#     def create(name: str, serial_number: str, purchase_date: datetime, price: float=0.00) -> 'FlightController':
-#         """Creates a new flight controller."""
-#         controller = FlightController(name=name, serial_number=serial_number, purchase_date=purchase_date, price=price)
-#         return controller
-
-#     @property
-#     def total_flight_time(self) -> float:
-#         """Returns the total flight time of the drone in minutes."""
-#         if not self.drone: return 0.00
-#         return sum(flight.duration for flight in self.drone.flights if flight.active)
-
-#     @property
-#     def total_flights(self) -> int:
-#         """Returns the total number of flights the drone has taken."""
-#         if not self.drone: return 0.00
-#         return len([flight for flight in self.drone.flights if flight.active])
-
-#     @property
-#     def combobox_name(self) -> str:
-#         return f"[{self.serial_number}] {self.name}"
-    
-#     @property
-#     def age(self) -> float:
-#         """Returns the age of the battery in years from the purchase date."""
-#         return round((datetime.now() - self.purchase_date).days / 365, 2) if self.purchase_date else 0
-
-#     @staticmethod
-#     def find_by_serial_number(session: Session, serial_number: str) -> 'FlightController':
-#         """Finds a flight controller by serial number."""
-#         return session.query(FlightController).filter(FlightController.serial_number == serial_number).first()
-    
-#     @staticmethod
-#     def find_by_combobox_name(combobox_name: str) -> 'FlightController':
-#         """Finds a flight controller by combobox name."""
-#         serial_number = combobox_name.split("]")[0].strip("[").strip()
-#         return FlightController.find_by_serial_number(serial_number)
-    
-#     @staticmethod
-#     def find_all(session: Session) -> List['FlightController']:
-#         """Finds all flight controllers."""
-#         return session.query(FlightController).all()
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['FlightStatus']:
+        return session.query(FlightStatus).filter_by(name=name).first()
 
 
 class Image(Base):
@@ -495,7 +499,7 @@ class Image(Base):
     read_only = Column(Boolean, nullable=False, default=False)
 
     def __repr__(self):
-        return f"<Image(name={self.name})>"
+        return f"<Image(id={self.id}, name='{self.name}')>"
     
     def to_QImage(self) -> QImage:
         """Converts the image to a QImage."""
@@ -513,6 +517,10 @@ class Image(Base):
         with open(file_path, "rb") as f:
             data = f.read()
         return ImageData(file_path=file_path, file_name=file_name, file_extension=file_extension, data=data)
+    
+    @staticmethod
+    def convert_from_base64(data: dict) -> ImageData:
+        return ImageData(file_path="", file_name=data["file_name"], file_extension=data['file_extension'], data=base64.b64decode(data['data']))
 
     @staticmethod
     def upload(session: Session, name: str, data: bytes, file_extention: str) -> 'Image':
@@ -548,6 +556,12 @@ class DroneGeometry(Base):
     """The direction the propellers thrust. Defaults to Vertical."""
 
     image = relationship("Image", foreign_keys=[image_id]) # type: Image
+
+    def __repr__(self):
+        return f"<DroneGeometry(id={self.id}, name='{self.name}')>"
+
+    def __str__(self) -> str:
+        return f"{self.name} - {self.description}"
 
     @staticmethod
     def find_by_name(session: Session, name: str) -> 'DroneGeometry':
@@ -629,7 +643,7 @@ class Battery(Base):
     """The max number of charge cycles the battery can last."""
     max_flights = Column(Integer, default=1000)
     """The max number of flights the battery can last."""
-    purchase_date = Column(DateTime, default=datetime.datetime.now)
+    purchase_date = Column(DateTime, default=datetime.now)
     serial_number = Column(String(256), unique=True, nullable=False)
     status = Column(Enum(enums.Airworthyness), default=enums.Airworthyness.Airworthy, nullable=False) # type: enums.Airworthyness
     """The airworthiness status of the battery."""
@@ -748,7 +762,7 @@ class Drone(Base):
     """Maximum vertical speed of the drone in meters per second."""
     model = Column(String(50))
     name = Column(String(50))
-    purchase_date = Column(DateTime, default=datetime.datetime.now)
+    purchase_date = Column(DateTime, default=datetime.now)
     serial_number = Column(String(256), unique=True)
     status = Column(Enum(enums.Airworthyness), default=enums.Airworthyness.Airworthy) # type: enums.Airworthyness
     """The airworthyness of the drone."""
@@ -756,7 +770,7 @@ class Drone(Base):
     """The drone's weight in kilograms."""
 
     batteries = relationship("Battery", secondary=drone_to_batteries_table) # type: List[Battery]
-    flight_controller = relationship("Equipment", back_populates="drone", foreign_keys=[flight_controller_id]) # type: Equipment
+    flight_controller = relationship("Equipment", foreign_keys=[flight_controller_id]) # type: Equipment
     flights = relationship("Flight", back_populates="drone") # type: List[Flight]
     geometry = relationship("DroneGeometry", foreign_keys=[geometry_id]) # type: DroneGeometry
 
@@ -891,7 +905,7 @@ class Flight(Base):
     """The latitude of the flight's location."""
     location_longitude = Column(Float)
     """The longitude of the flight's location."""
-    legal_rule_id = Column(Integer, ForeignKey("legal_rules.id"), nullable=False)
+    legal_rule_id = Column(Integer, ForeignKey("legal_rule.id"), nullable=False)
     legal_rule_details = Column(String(256), default="")
     max_agl_altitude = Column(Float, default=0.00)
     """The maximum altitude AGL in meters."""
@@ -916,7 +930,7 @@ class Flight(Base):
     operation_approval = relationship("FlightOperationApproval", foreign_keys=[operation_approval_id]) # type: FlightOperationApproval
     status = relationship("FlightStatus", foreign_keys=[status_id]) # type: FlightStatus
     type_ = relationship("FlightType", foreign_keys=[type_id]) # type: FlightType
-    used_equipment = relationship("Equipment", secondary=flight_to_equipment_table) # type: List[Equipment]
+    used_equipment = relationship("Equipment", secondary=flight_to_equipment_table, back_populates="flights") # type: List[Equipment]
     weather = relationship("Weather", back_populates="flight", uselist=False) # type: Weather
 
     def __repr__(self) -> str:
@@ -1074,7 +1088,7 @@ class Equipment(Base):
     type_id = Column(Integer, ForeignKey("equipment_type.id"), nullable=False)
 
     type_ = relationship("EquipmentType") # type: EquipmentType
-    flights = relationship("Flight", secondary=flight_to_equipment_table) # type: List[Flight]
+    flights = relationship("Flight", secondary=flight_to_equipment_table, back_populates="used_equipment") # type: List[Flight]
 
     def start_flight(self, flight: Flight):
         """Starts a flight."""
@@ -1105,7 +1119,7 @@ class Equipment(Base):
     @property
     def total_flight_time(self) -> float:
         """Returns the flight time of the equipment in minutes."""
-        return sum(equipment_to_flight.flight.duration for equipment_to_flight in self.flights if equipment_to_flight.flight.active)
+        return sum(flight.duration for flight in self.flights if flight.active)
     
     @staticmethod
     def find_by_serial_number(session: Session, serial_number: str) -> 'Equipment':
@@ -1129,13 +1143,13 @@ class Equipment(Base):
         return Equipment.find_by_serial_number(session, serial_number)
     
     @staticmethod
-    def create(name: str, serial_number: str, purchase_date: datetime.datetime, price: float, type_: EquipmentType, description: str="") -> 'Equipment':
+    def create(name: str, serial_number: str, purchase_date: datetime, price: float, type_: EquipmentType, description: str="") -> 'Equipment':
         """Creates a new equipment.
 
         Args:
             name (str): The name of the equipment.
             serial_number (str): The serial number of the equipment.
-            purchase_date (datetime.datetime): The date the equipment was purchased.
+            purchase_date (datetime): The date the equipment was purchased.
             price (float): The value of the equipment in US dollars.
             type_ (EquipmentType): The type of the equipment.
             description (str): The description of the equipment.
@@ -1266,6 +1280,14 @@ class CrewMemberRole(Type_):
     description = Column(String(256))
     required_for_flight = Column(Boolean, default=False)
 
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['CrewMemberRole']:
+        return session.query(CrewMemberRole).filter_by(id=id_).first()
+    
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['CrewMemberRole']:
+        return session.query(CrewMemberRole).filter_by(name=name).first()
+
 
 class CrewMemberToFlight(DeclarativeBase):
     """Represents a mapping between a crew member and a flight."""
@@ -1285,6 +1307,14 @@ class DocumentType(Type_):
     __tablename__ = "document_type"
 
     description = Column(String(256))
+
+    @staticmethod
+    def find_by_id(session: Session, id_: int) -> Optional['DocumentType']:
+        return session.query(DocumentType).filter_by(id=id_).first()
+    
+    @staticmethod
+    def find_by_name(session: Session, name: str) -> Optional['DocumentType']:
+        return session.query(DocumentType).filter_by(name=name).first()
 
 
 class Document(Base):

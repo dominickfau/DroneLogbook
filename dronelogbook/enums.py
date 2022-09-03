@@ -13,9 +13,9 @@ class Airworthyness(PythonEnum):
 
 
 class EquipmentGroup(PythonEnum):
-    Ground_Equipment = "Ground Equipment"
+    Ground = "Ground"
     """Used for equipment that will stay on the ground."""
-    Airborne_Equipment = "Airborne Equipment"
+    Airborne = "Airborne"
     """Used for equipment that will attach to a drone."""
 
 

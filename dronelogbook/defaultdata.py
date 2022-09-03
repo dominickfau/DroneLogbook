@@ -1,7 +1,10 @@
 import logging
+import base64
 from .config import *
 from .database import DBContext
-from . import models
+from . import models, errors
+from .drone_geometry import imagedata
+from dronelogbook import drone_geometry
 
 
 logger = logging.getLogger("backend")
@@ -26,15 +29,15 @@ def load_default_data() -> None:
         # Create Uoms
         logger.info("[SYSTEM] Checking Uoms.")
         for uom in uoms:
-            uom_obj = session.query(models.Uom).filter(models.Uom.name == uom["type_name"]).first() # type: models.Uom
-            if not uom_obj:
-                uom_obj = models.Uom(**uom)
-                uom_obj.type_name = uom["type_name"]
-                session.add(uom_obj)
+            obj = session.query(models.Uom).filter(models.Uom.name == uom["name"]).first() # type: models.Uom
+            if not obj:
+                obj = models.Uom(**uom)
+                obj.type_name = uom["type_name"]
+                session.add(obj)
                 session.commit()
-                logger.info(f"[SYSTEM] Created '{uom_obj}'")
+                logger.info(f"[SYSTEM] Created '{obj}'")
             else:
-                logger.debug(f"[SYSTEM] Uom '{uom['name']}' already exists.")
+                logger.debug(f"[SYSTEM] Uom '{obj}' already exists.")
         
         # Create UomConversions
         logger.info("[SYSTEM] Checking UomConversions.")
@@ -52,16 +55,14 @@ def load_default_data() -> None:
             uom_conversion["from_uom_id"] = from_uom.id
             uom_conversion["to_uom_id"] = to_uom.id
 
-            uom_conversion_obj = session.query(models.UomConversion).filter_by(from_uom_id=from_uom.id, to_uom_id=to_uom.id).first() # type: models.UomConversion
-            if not uom_conversion_obj:
-                uom_conversion_obj = models.UomConversion(**uom_conversion)
-                uom_conversion_obj.created_by_user = user_obj
-                uom_conversion_obj.modified_by_user = user_obj
-                session.add(uom_conversion_obj)
+            obj = session.query(models.UomConversion).filter_by(from_uom_id=from_uom.id, to_uom_id=to_uom.id).first() # type: models.UomConversion
+            if not obj:
+                obj = models.UomConversion(**uom_conversion)
+                session.add(obj)
                 session.commit()
-                logger.info(f"[SYSTEM] Created '{uom_conversion_obj}'")
+                logger.info(f"[SYSTEM] Created '{obj}'")
             else:
-                logger.debug(f"[SYSTEM] UomConversion '{uom_conversion_obj}' already exists.")
+                logger.debug(f"[SYSTEM] UomConversion '{obj}' already exists.")
 
 
         # Create LegalRule
@@ -69,7 +70,8 @@ def load_default_data() -> None:
         for rule_name in legal_rules:
             obj = session.query(models.LegalRule).filter(models.LegalRule.name == rule_name).first()
             if not obj:
-                session.add(models.LegalRule(name=rule_name))
+                obj = models.LegalRule(name=rule_name)
+                session.add(obj)
                 session.commit()
                 logger.info(f"[SYSTEM] Created '{obj}'")
             else:
@@ -81,7 +83,8 @@ def load_default_data() -> None:
         for equipment_type in equipment_types:
             obj = session.query(models.EquipmentType).filter(models.EquipmentType.name == equipment_type["name"]).first()
             if not obj:
-                session.add(models.EquipmentType(*equipment_type))
+                obj = models.EquipmentType(**equipment_type)
+                session.add(obj)
                 session.commit()
                 logger.info(f"[SYSTEM] Created '{obj}'")
             else:
@@ -91,9 +94,10 @@ def load_default_data() -> None:
         # Create MaintenanceStatus
         logger.info("[SYSTEM] Checking MaintenanceStatus.")
         for maintenance_status in maintenance_statuses:
-            obj = session.query(models.MaintenanceStatus).filter(models.MaintenanceStatus.name == maintenance_status).first()
+            obj = session.query(models.MaintenanceStatus).filter(models.MaintenanceStatus.name == maintenance_status['name']).first()
             if not obj:
-                session.add(models.MaintenanceStatus(name=maintenance_status))
+                obj = models.MaintenanceStatus(**maintenance_status)
+                session.add(obj)
                 session.commit()
                 logger.info(f"[SYSTEM] Created '{obj}'")
             else:
@@ -105,7 +109,8 @@ def load_default_data() -> None:
         for maintenance_task_status in maintenance_task_statuses:
             obj = session.query(models.MaintenanceTaskStatus).filter(models.MaintenanceTaskStatus.name == maintenance_task_status["name"]).first()
             if not obj:
-                session.add(models.MaintenanceTaskStatus(*maintenance_task_status))
+                obj = models.MaintenanceTaskStatus(**maintenance_task_status)
+                session.add(obj)
                 session.commit()
                 logger.info(f"[SYSTEM] Created '{obj}'")
             else:
@@ -117,9 +122,10 @@ def load_default_data() -> None:
         for flight_operation_approval in flight_operation_approvals:
             obj = session.query(models.FlightOperationApproval).filter(models.FlightOperationApproval.name == flight_operation_approval["name"]).first()
             if not obj:
-                session.add(models.FlightOperationApproval(*flight_operation_approval))
+                obj = models.FlightOperationApproval(**flight_operation_approval)
+                session.add(obj)
                 session.commit()
-                logger.info(f"[SYSTEM] Created '{uom_conversion_obj}'")
+                logger.info(f"[SYSTEM] Created '{obj}'")
             else:
                 obj.description = flight_operation_approval["description"]
                 session.commit()
@@ -131,9 +137,10 @@ def load_default_data() -> None:
         for flight_operation_type in flight_operation_types:
             obj = session.query(models.FlightOperationType).filter(models.FlightOperationType.name == flight_operation_type["name"]).first()
             if not obj:
-                session.add(models.FlightOperationType(*flight_operation_type))
+                obj = models.FlightOperationType(**flight_operation_type)
+                session.add(obj)
                 session.commit()
-                logger.info(f"[SYSTEM] Created '{uom_conversion_obj}'")
+                logger.info(f"[SYSTEM] Created '{obj}'")
             else:
                 obj.description = flight_operation_type["description"]
                 session.commit()
@@ -143,11 +150,19 @@ def load_default_data() -> None:
         # Create FlightType
         logger.info("[SYSTEM] Checking FlightTypes.")
         for flight_type in flight_types:
+            flight_operation_type = session.query(models.FlightOperationType).filter_by(name=flight_type["flight_operation_type_name"]).first()
+            if not flight_operation_type:
+                raise errors.LoadDefaultDataError(f"Could not find flight operation type '{flight_type['flight_operation_type_name']}'.")
+            
+            flight_type.pop("flight_operation_type_name", None)
+            flight_type["flight_operation_type"] = flight_operation_type
+
             obj = session.query(models.FlightType).filter(models.FlightType.name == flight_type["name"]).first()
             if not obj:
-                session.add(models.FlightType(*flight_type))
+                obj = models.FlightType(**flight_type)
+                session.add(obj)
                 session.commit()
-                logger.info(f"[SYSTEM] Created '{uom_conversion_obj}'")
+                logger.info(f"[SYSTEM] Created '{obj}'")
             else:
                 obj.description = flight_type["description"]
                 session.commit()
@@ -159,25 +174,45 @@ def load_default_data() -> None:
         for flight_status in flight_statuses:
             obj = session.query(models.FlightStatus).filter(models.FlightStatus.name == flight_status["name"]).first()
             if not obj:
-                session.add(models.FlightStatus(*flight_status))
+                obj = models.FlightStatus(**flight_status)
+                session.add(obj)
                 session.commit()
                 logger.info(f"[SYSTEM] Created '{obj}'")
             else:
                 logger.debug(f"[SYSTEM] FlightStatus '{obj}' already exists.")
 
+
         # Create Images
         logger.info("[SYSTEM] Checking Images.")
-        for root, dirs, files in os.walk(DRONE_GEOMETRY_IMAGE_FOLDER):
-            for file in files:
-                image_data = models.Image.convert_to_bytes(os.path.join(root, file)) # type: models.ImageData
-                image_data.file_name = image_data.file_name.replace("_", " ")
-                if not models.Image.find_by_name(image_data.file_name):
-                    image = models.Image(name=image_data.file_name, data=image_data.data, file_extention=image_data.file_extension, read_only=True)
-                    session.add(image)
-                    logger.info(f"[SYSTEM] Created Image '{image_data.file_name}.{image_data.file_extension}'")
-                else:
-                    logger.debug(f"[SYSTEM] Image '{image_data.file_name}.{image_data.file_extension}' already exists.")
+        for file in imagedata.data:
+            data = imagedata.data[file]
+            image_data = models.Image.convert_from_base64(data) # type: models.ImageData
+            image = models.Image.find_by_name(session, image_data.database_name)
+            if not image:
+                image = models.Image(name=image_data.database_name, data=image_data.data, file_extention=image_data.file_extension, read_only=True)
+                session.add(image)
+                logger.info(f"[SYSTEM] Created Image '{image}'")
+            else:
+                logger.debug(f"[SYSTEM] Image '{image}' already exists.")
         session.commit()
+
+
+        # Create DroneGeometry
+        logger.info("[SYSTEM] Checking DroneGeometry.")
+        for drone_geometry in drone_geometries:
+            obj = session.query(models.DroneGeometry).filter(models.DroneGeometry.name == drone_geometry["name"]).first()
+            if not obj:
+                image_name = drone_geometry.pop("image_name", None)
+                image = session.query(models.Image).filter(models.Image.name == image_name).first()
+                if not image:
+                    raise errors.LoadDefaultDataError(f"Could not find image '{image_name}'.")
+                drone_geometry['image'] = image
+                obj = models.DroneGeometry(**drone_geometry)
+                session.add(obj)
+                session.commit()
+                logger.info(f"[SYSTEM] Created '{obj}'")
+            else:
+                logger.debug(f"[SYSTEM] DroneGeometry '{obj}' already exists.")
 
 
 
@@ -222,12 +257,6 @@ uoms = [
         "code": "gal",
         "description": "Basic US unit of liquid volume.",
         "name": "Gallon",
-        "type_name": "Volume"
-    },
-    {
-        "code": "floz",
-        "description": "US unit of liquid volume.",
-        "name": "Fluid Ounce",
         "type_name": "Volume"
     },
     {
@@ -636,127 +665,140 @@ legal_rules = [
 equipment_types = [
     {
         "name": "Airframe",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Anenometer",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Battery",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Charger",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Camera",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Cradle",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Drive (Disk, Flash, etc.)",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "FPV Glasses",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "GPS",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Lens",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Light",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Monitor",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Motor",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Parachute",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Phone / Tablet",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Power Supply",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Prop Guards",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Propeller",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Radio Receiver",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Radio Transmitter",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Range Extender",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Laser Range Finder",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Remote Controller",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Sensor",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Spreader",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Telemetry Radio",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Tripod",
-        "group": "Ground Equipment"
+        "group": "Ground"
     },
     {
         "name": "Video Transmitter",
-        "group": "Airborne Equipment"
+        "group": "Airborne"
     },
     {
         "name": "Other Ground",
-        "group": "Ground Equipment"
+        "group": "Ground"
     }
 ]
 
 
 maintenance_statuses = [
-    "Scheduled",
-    "InProgress",
-    "Completed",
+    {
+        "id": 10,
+        "name": "Open"
+    },
+    {
+        "id": 20,
+        "name": "Scheduled"
+    },
+    {
+        "id": 30,
+        "name": "InProgress"
+    },
+    {
+        "id": 40,
+        "name": "Finished"
+    }
 ]
 
 
@@ -771,7 +813,7 @@ maintenance_task_statuses = [
     },
     {
         "id": 30,
-        "name": "Done"
+        "name": "Finished"
     }
 ]
 
@@ -811,82 +853,102 @@ flight_operation_types = [
 flight_types = [
     {
         "name": "Commercial - Agriculture",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Commercial - Inspection",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Commercial - Mapping",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Commercial - Survey",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Commercial - Photo/Video",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Commercial - Other",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Emergency",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Hobby - Entertainment",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Maintenance",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Mapping - HR",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Mapping - UHR",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Photogrammetry",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Science",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Search & Rescue",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Simulator",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Situational Awareness",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Spreading",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Survaliance",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name": "Test Flight",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
     {
         "name":"Training",
+        "flight_operation_type_name": "VLOS Manual",
         "description": ""
     },
 ]
@@ -906,185 +968,202 @@ flight_statuses = [
     }
 ]
 
-data = [
-    DroneGeometry(name="Fixed Wing 1",
-                    description="A fixed wing drone with one propeller on the front nose.",
-                    image_id=Image.find_by_name("Fixed Wing 1").id,
-                    number_of_propellers=1,thrust_direction="Horizontal"
-                    ),
-    DroneGeometry(name="Fixed Wing 2",
-                    description="A fixed wing drone with one propeller on the back.",
-                    image_id=Image.find_by_name("Fixed Wing 2").id,
-                    number_of_propellers=1,thrust_direction="Horizontal"
-                    ),
-    DroneGeometry(name="Hexa Plus",
-                    description="A drone with six propellers, starting from the front.",
-                    image_id=Image.find_by_name("Hexa Plus").id,
-                    number_of_propellers=6,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Hexa X",
-                    description="A drone with six propellers, starting from the front right.",
-                    image_id=Image.find_by_name("Hexa X").id,
-                    number_of_propellers=6,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Octa Plus",
-                    description="A drone with eight propellers, starting from the front.",
-                    image_id=Image.find_by_name("Octa Plus").id,
-                    number_of_propellers=8,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Octa V",
-                    description="A drone with eight propellers, a row on each side in the shape o a V.",
-                    image_id=Image.find_by_name("Octa V").id,
-                    number_of_propellers=8,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Octa X",
-                    description="A drone with eight propellers, starting from the front right.",
-                    image_id=Image.find_by_name("Octa X").id,
-                    number_of_propellers=8,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Quad Plus",
-                    description="A drone with four propellers, starting from the front.",
-                    image_id=Image.find_by_name("Quad Plus").id,
-                    number_of_propellers=4,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Quad X",
-                    description="A drone with four propellers, starting from the front right.",
-                    image_id=Image.find_by_name("Quad X").id,
-                    number_of_propellers=4,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Single Coaxial",
-                    description="A drone with two propellers on the top.",
-                    image_id=Image.find_by_name("Single Coaxial").id,
-                    number_of_propellers=2,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Single Rotor",
-                    description="A drone with one propeller on the top.",
-                    image_id=Image.find_by_name("Single Rotor").id,
-                    number_of_propellers=1,
-                    alternating_rotaion=False
-                    ),
-    DroneGeometry(name="Tri",
-                    description="A drone with three propellers, starting from the front right in the shape of a Y.",
-                    image_id=Image.find_by_name("Tri").id,
-                    number_of_propellers=3,
-                    alternating_rotaion=False
-                    ),
-    DroneGeometry(name="VTOL 1",
-                    description="A drone / air plane hybrid.",
-                    image_id=Image.find_by_name("VTOL 1").id,
-                    number_of_propellers=5,
-                    alternating_rotaion=True,
-                    thrust_direction="Horizontal"
-                    ),
-    DroneGeometry(name="VTOL 2",
-                    description="An air plane with 2 propellers on the wings.",
-                    image_id=Image.find_by_name("VTOL 2").id,
-                    number_of_propellers=2,
-                    thrust_direction="Vertical"
-                    ),
-    DroneGeometry(name="VTOL 3",
-                    description="A drone / air plane hybrid, starting from the front right in the shape of a Y.",
-                    image_id=Image.find_by_name("VTOL 3").id,
-                    number_of_propellers=6,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="X8 Coaxial",
-                    description="A drone with eight propellers, similar to a Quad Plus, but with popellers top and bottom.",
-                    image_id=Image.find_by_name("X8 Coaxial").id,
-                    number_of_propellers=8,
-                    alternating_rotaion=True
-                    ),
-    DroneGeometry(name="Y6 Coaxial",
-                    description="A drone with six propellers, similar to a Tri, but with popellers top and bottom.",
-                    image_id=Image.find_by_name("Y6 Coaxial").id,
-                    number_of_propellers=6,
-                    alternating_rotaion=True
-                    ),
+drone_geometries = [
+    {
+        "name": "Fixed Wing 1",
+        "description": "A fixed wing drone with one propeller on the front nose.",
+        "image_name": "Fixed Wing 1",
+        "number_of_propellers": 1,
+        "thrust_direction": "Horizontal"
+    },
+    {
+        "name": "Fixed Wing 2",
+        "description": "A fixed wing drone with one propeller on the back.",
+        "image_name": "Fixed Wing 2",
+        "number_of_propellers": 1,
+        "thrust_direction": "Horizontal"
+    },
+    {
+        "name": "Hexa Plus",
+        "description": "A drone with six propellers, starting from the front.",
+        "image_name": "Hexa Plus",
+        "number_of_propellers": 6,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Hexa X",
+        "description": "A drone with six propellers, starting from the front right.",
+        "image_name": "Hexa X",
+        "number_of_propellers": 6,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Octa Plus",
+        "description": "A drone with eight propellers, starting from the front.",
+        "image_name": "Octa Plus",
+        "number_of_propellers": 8,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Octa V",
+        "description": "A drone with eight propellers, a row on each side in the shape o a V.",
+        "image_name": "Octa V",
+        "number_of_propellers": 8,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Octa X",
+        "description": "A drone with eight propellers, starting from the front right.",
+        "image_name": "Octa X",
+        "number_of_propellers": 8,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Quad Plus",
+        "description": "A drone with four propellers, starting from the front.",
+        "image_name": "Quad Plus",
+        "number_of_propellers": 4,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Quad X",
+        "description": "A drone with four propellers, starting from the front right.",
+        "image_name": "Quad X",
+        "number_of_propellers": 4,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Single Coaxial",
+        "description": "A drone with two propellers on the top.",
+        "image_name": "Single Coaxial",
+        "number_of_propellers": 2,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Single Rotor",
+        "description": "A drone with one propeller on the top.",
+        "image_name": "Single Rotor",
+        "number_of_propellers": 1
+    },
+    {
+        "name": "Tri",
+        "description": "A drone with three propellers, starting from the front right in the shape of a Y.",
+        "image_name": "Tri",
+        "number_of_propellers": 3
+    },
+    {
+        "name": "VTOL 1",
+        "description": "A drone / air plane hybrid.",
+        "image_name": "VTOL 1",
+        "number_of_propellers": 5,
+        "alternating_rotaion": True,
+        "thrust_direction": "Horizontal"
+    },
+    {
+        "name": "VTOL 2",
+        "description": "An air plane with 2 propellers on the wings.",
+        "image_name": "VTOL 2",
+        "number_of_propellers": 2,
+        "thrust_direction": "Vertical"
+    },
+    {
+        "name": "VTOL 3",
+        "description": "A drone / air plane hybrid, starting from the front right in the shape of a Y.",
+        "image_name": "VTOL 3",
+        "number_of_propellers": 6,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "X8 Coaxial",
+        "description": "A drone with eight propellers, similar to a Quad Plus, but with popellers top and bottom.",
+        "image_name": "X8 Coaxial",
+        "number_of_propellers": 8,
+        "alternating_rotaion": True
+    },
+    {
+        "name": "Y6 Coaxial",
+        "description": "A drone with six propellers, similar to a Tri, but with popellers top and bottom.",
+        "image_name": "Y6 Coaxial",
+        "number_of_propellers": 6,
+        "alternating_rotaion": True
+    }
 ]
 
 
-data = [
-    BatteryChemistry(
-        name="Lithium Ion",
-        code="Li-Ion",
-        description="Lithium Ion battery chemistry.",
-        unrecoverable_low_cell_voltage=3.0,
-        nominal_cell_voltage=3.7,
-        safe_min_cell_voltage=3.3,
-        max_cell_voltage=4.2,
-        min_temperature=20,
-        max_temperature=40,
-        max_charge_current=2.5,
-        max_discharge_current=2.5,
-        esr=0.5
-    ),
-    BatteryChemistry(
-        name="Lithium Polymer",
-        code="Li-Po",
-        description="Lithium Polymer battery chemistry.",
-        unrecoverable_low_cell_voltage=3.2,
-        nominal_cell_voltage=3.7,
-        safe_min_cell_voltage=3.3,
-        max_cell_voltage=4.2,
-        min_temperature=20,
-        max_temperature=40,
-        max_charge_current=2.5,
-        max_discharge_current=2.5,
-        esr=0.5
-    ),
-    BatteryChemistry(
-        name="Nickel Cadmium",
-        code="NiCd",
-        description="Nickel Cadmium battery chemistry.",
-        unrecoverable_low_cell_voltage=3.2,
-        nominal_cell_voltage=3.7,
-        safe_min_cell_voltage=3.3,
-        max_cell_voltage=4.2,
-        min_temperature=20,
-        max_temperature=40,
-        max_charge_current=2.5,
-        max_discharge_current=2.5,
-        esr=0.5
-    ),
-    BatteryChemistry(
-        name="Nickel Metal Hydride",
-        code="NiMH",
-        description="Nickel Metal Hydride battery chemistry.",
-        unrecoverable_low_cell_voltage=3.2,
-        nominal_cell_voltage=3.7,
-        safe_min_cell_voltage=3.3,
-        max_cell_voltage=4.2,
-        min_temperature=20,
-        max_temperature=40,
-        max_charge_current=2.5,
-        max_discharge_current=2.5,
-        esr=0.5
-    ),
-]
+# data = [
+#     BatteryChemistry(
+#         name="Lithium Ion",
+#         code="Li-Ion",
+#         description="Lithium Ion battery chemistry.",
+#         unrecoverable_low_cell_voltage=3.0,
+#         nominal_cell_voltage=3.7,
+#         safe_min_cell_voltage=3.3,
+#         max_cell_voltage=4.2,
+#         min_temperature=20,
+#         max_temperature=40,
+#         max_charge_current=2.5,
+#         max_discharge_current=2.5,
+#         esr=0.5
+#     ),
+#     BatteryChemistry(
+#         name="Lithium Polymer",
+#         code="Li-Po",
+#         description="Lithium Polymer battery chemistry.",
+#         unrecoverable_low_cell_voltage=3.2,
+#         nominal_cell_voltage=3.7,
+#         safe_min_cell_voltage=3.3,
+#         max_cell_voltage=4.2,
+#         min_temperature=20,
+#         max_temperature=40,
+#         max_charge_current=2.5,
+#         max_discharge_current=2.5,
+#         esr=0.5
+#     ),
+#     BatteryChemistry(
+#         name="Nickel Cadmium",
+#         code="NiCd",
+#         description="Nickel Cadmium battery chemistry.",
+#         unrecoverable_low_cell_voltage=3.2,
+#         nominal_cell_voltage=3.7,
+#         safe_min_cell_voltage=3.3,
+#         max_cell_voltage=4.2,
+#         min_temperature=20,
+#         max_temperature=40,
+#         max_charge_current=2.5,
+#         max_discharge_current=2.5,
+#         esr=0.5
+#     ),
+#     BatteryChemistry(
+#         name="Nickel Metal Hydride",
+#         code="NiMH",
+#         description="Nickel Metal Hydride battery chemistry.",
+#         unrecoverable_low_cell_voltage=3.2,
+#         nominal_cell_voltage=3.7,
+#         safe_min_cell_voltage=3.3,
+#         max_cell_voltage=4.2,
+#         min_temperature=20,
+#         max_temperature=40,
+#         max_charge_current=2.5,
+#         max_discharge_current=2.5,
+#         esr=0.5
+#     ),
+# ]
 
-data = [
-    CrewMemberRole(name=CrewMemberRole.Approved_Delegate, description="A crew member who is approved to fly a drone."),
-    CrewMemberRole(name=CrewMemberRole.Ground_Support, description="A crew member who is responsible for ground support."),
-    CrewMemberRole(name=CrewMemberRole.Maintenance_Controller, description="A crew member who is responsible for maintenance."),
-    CrewMemberRole(name=CrewMemberRole.Observer, description="A crew member who is responsible for keeping VLOS of the drone during flight."),
-    CrewMemberRole(name=CrewMemberRole.Payload_Controller, description="A crew member who is responsible for payload control."),
-    CrewMemberRole(name=CrewMemberRole.Pilot, description="A crew member who is responsible for flying the drone."),
-    CrewMemberRole(name=CrewMemberRole.Student, description="A crew member who is a student learning."),
-    CrewMemberRole(name=CrewMemberRole.Remote_Pilot_In_Command, required_for_flight=True, description="A crew member who holds a remote pilot certificate with an sUAS rating and has the final authority and responsibility for the operation and safety of an sUAS operation conducted under part 107.")
-]
+# data = [
+#     CrewMemberRole(name=CrewMemberRole.Approved_Delegate, description="A crew member who is approved to fly a drone."),
+#     CrewMemberRole(name=CrewMemberRole.Ground_Support, description="A crew member who is responsible for ground support."),
+#     CrewMemberRole(name=CrewMemberRole.Maintenance_Controller, description="A crew member who is responsible for maintenance."),
+#     CrewMemberRole(name=CrewMemberRole.Observer, description="A crew member who is responsible for keeping VLOS of the drone during flight."),
+#     CrewMemberRole(name=CrewMemberRole.Payload_Controller, description="A crew member who is responsible for payload control."),
+#     CrewMemberRole(name=CrewMemberRole.Pilot, description="A crew member who is responsible for flying the drone."),
+#     CrewMemberRole(name=CrewMemberRole.Student, description="A crew member who is a student learning."),
+#     CrewMemberRole(name=CrewMemberRole.Remote_Pilot_In_Command, required_for_flight=True, description="A crew member who holds a remote pilot certificate with an sUAS rating and has the final authority and responsibility for the operation and safety of an sUAS operation conducted under part 107.")
+# ]
 
-data = [
-    DocumentType(name="Pilot Registration", description="A document that shows the pilot's registration."),
-    DocumentType(name="Pilot License", description="A document that shows the pilot's license."),
-    DocumentType(name="Remote Pilot Certificate", description="A document that shows the remote pilot's certificate."),
-    DocumentType(name="Medical Certificate", description="A document that shows the medical certificate."),
-    DocumentType(name="Other", description="A document that shows other documents.")
-]
+# data = [
+#     DocumentType(name="Pilot Registration", description="A document that shows the pilot's registration."),
+#     DocumentType(name="Pilot License", description="A document that shows the pilot's license."),
+#     DocumentType(name="Remote Pilot Certificate", description="A document that shows the remote pilot's certificate."),
+#     DocumentType(name="Medical Certificate", description="A document that shows the medical certificate."),
+#     DocumentType(name="Other", description="A document that shows other documents.")
+# ]

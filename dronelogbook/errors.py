@@ -2,6 +2,9 @@ class Error(Exception):
     """Base class for exceptions in this module."""
     pass
 
+class LoadDefaultDataError(Error):
+    """Raised if an issue occurs when creating default data."""
+
 class MissingRequiredSoftwareError(Error):
     """Raised when a missing software package is missing or not found."""
     pass

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1076</width>
-    <height>810</height>
+    <width>692</width>
+    <height>744</height>
    </rect>
   </property>
   <property name="minimumSize">
@@ -245,7 +245,7 @@ QComboBox{
                 <bool>false</bool>
                </property>
                <property name="currentIndex">
-                <number>2</number>
+                <number>0</number>
                </property>
                <widget class="QWidget" name="drone_general_tab">
                 <attribute name="title">
@@ -3377,8 +3377,8 @@ QComboBox{
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1076</width>
-     <height>21</height>
+     <width>692</width>
+     <height>18</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFIle">

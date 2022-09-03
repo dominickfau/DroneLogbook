@@ -59,22 +59,18 @@ dictConfig(
             # },
         },
         "loggers": {
-            "root": {
-                "level": LOG_LEVEL,
-                "handlers": ["log_file", "console"],
-            },
+            # "root": {
+            #     "level": LOG_LEVEL,
+            #     "handlers": ["log_file", "console"],
+            # },
             "backend": {
                 "level": LOG_LEVEL,
                 "handlers": ["log_file", "console"],
             },
-            "frontend": {
-                "level": LOG_LEVEL,
-                "handlers": ["log_file", "console"],
-            },
-            "werkzeug": {
-                "level": LOG_LEVEL,
-                "handlers": ["log_file", "console"],
-            },
+            # "frontend": {
+            #     "level": LOG_LEVEL,
+            #     "handlers": ["log_file", "console"],
+            # },
             # "sqlalchemy.engine": {
             #     "level": LOG_LEVEL,
             #     "handlers": ["sqlalchemy_engine_log_file"],

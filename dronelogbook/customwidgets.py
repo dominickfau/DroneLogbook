@@ -1,6 +1,5 @@
 from __future__ import annotations
 from PyQt5 import QtCore, QtGui, QtWidgets
-from database import global_session
 
 
 

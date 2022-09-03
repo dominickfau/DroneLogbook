@@ -27,11 +27,11 @@ class AuditMixin:
 
     @declared_attr
     def date_created(self) -> Column:
-        return Column(DateTime, nullable=False, default=datetime.datetime.now) # type: datetime.datetime
+        return Column(DateTime, nullable=False, default=datetime.now) # type: datetime
     
     @declared_attr
     def date_modified(self) -> Column:
-        return Column(DateTime, nullable=False, default=datetime.datetime.now) # type: datetime.datetime
+        return Column(DateTime, nullable=False, default=datetime.now) # type: datetime
     
     @declared_attr
     def modified_by_user_id(self) -> Column:

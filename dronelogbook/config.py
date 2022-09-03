@@ -18,10 +18,18 @@ class DefaultSetting:
     @property
     def hive_location(self) -> str:
         """Return the hive location path for this setting."""
-        base = f"HKEY_CURRENT_USER\SOFTWARE\{COMPANY_NAME}\{PROGRAM_NAME}"
+        base = f"HKEY_CURRENT_USER/SOFTWARE/{COMPANY_NAME}/{PROGRAM_NAME}"
         if self.group_name:
-            base += f"\{self.group_name}"
-        return f"{base}\{self.name}"
+            base += f"/{self.group_name}"
+        return f"{base}/{self.name}"
+    
+    @property
+    def base_hive_location(self) -> str:
+        """Return the base hive location path for this setting."""
+        base = f"HKEY_CURRENT_USER/SOFTWARE/{COMPANY_NAME}/{PROGRAM_NAME}"
+        if self.group_name:
+            base += f"/{self.group_name}"
+        return f"{base}"
 
     def initialize_setting(self) -> DefaultSetting:
         """Initialize the default setting or pulls the current setting value."""
@@ -86,7 +94,6 @@ DATETIME_FORMAT = "%m-%d-%Y %H:%M"
 DATE_FORMAT = "%m-%d-%Y"
 ENCODING_STR = "utf-8"
 THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH = 250, 400
-DRONE_GEOMETRY_IMAGE_FOLDER = os.path.join(os.curdir, "drone_geometry")
 LABEL_PRINTING_ENABLED = True
 
 DEBUG = DefaultSetting(settings=settings, name="debug", value=False).initialize_setting().value
@@ -111,18 +118,25 @@ if DEBUG:
 
 
 # Database Settings
-SCHEMA_NAME = DefaultSetting(settings=settings, group_name="Database/MySQL", name="Schema Name", value=f"{PROGRAM_NAME.lower().replace(' ', '')}").initialize_setting().value
-DATABASE_USER = DefaultSetting(settings=settings, group_name="Database/MySQL", name="User", value="").initialize_setting().value
-DATABASE_PASSWORD = DefaultSetting(settings=settings, group_name="Database/MySQL", name="Password", value="").initialize_setting().value
-DATABASE_HOST = DefaultSetting(settings=settings, group_name="Database/MySQL", name="Host", value="localhost").initialize_setting().value
-DATABASE_PORT = DefaultSetting(settings=settings, group_name="Database/MySQL", name="Port", value="3306").initialize_setting().value
+SCHEMA_NAME = DefaultSetting(settings=settings, group_name="Database/MySQL", name="Schema Name", value=f"{PROGRAM_NAME.lower().replace(' ', '')}").initialize_setting()
+DATABASE_USER = DefaultSetting(settings=settings, group_name="Database/MySQL", name="User", value="").initialize_setting()
+DATABASE_PASSWORD = DefaultSetting(settings=settings, group_name="Database/MySQL", name="Password", value="").initialize_setting()
+DATABASE_HOST = DefaultSetting(settings=settings, group_name="Database/MySQL", name="Host", value="localhost").initialize_setting()
+DATABASE_PORT = DefaultSetting(settings=settings, group_name="Database/MySQL", name="Port", value="3306").initialize_setting()
 DATABASE_DUMP_LOCATION = DefaultSetting(settings=settings, group_name="Database/MySQL", name="MySQLDump Location", value="").initialize_setting().value
 
 SCHEMA_CREATE_STATEMENT = f"CREATE DATABASE IF NOT EXISTS {SCHEMA_NAME} DEFAULT CHARACTER SET utf8 COLLATE utf8_bin;"
-DATABASE_URL_WITHOUT_SCHEMA = f"mysql+pymysql://{DATABASE_USER}:{DATABASE_PASSWORD}@{DATABASE_HOST}:{DATABASE_PORT}"
+DATABASE_URL_WITHOUT_SCHEMA = f"mysql+pymysql://{DATABASE_USER.value}:{DATABASE_PASSWORD.value}@{DATABASE_HOST.value}:{DATABASE_PORT.value}"
 DATABASE_URL_WITH_SCHEMA = f"{DATABASE_URL_WITHOUT_SCHEMA}/{SCHEMA_NAME}"
 FORCE_REBUILD_DATABASE = DefaultSetting(settings=settings, group_name="Database", name="Force Rebuild Database", value=False,).initialize_setting().value
 if FORCE_REBUILD_DATABASE == "true":
     FORCE_REBUILD_DATABASE = True
 else:
     FORCE_REBUILD_DATABASE = False
+
+
+# Github settings
+GITHUB_USERNAME = "dominickfau"
+GITHUB_REPO_NAME = "DroneLogbook"
+
+GITHUB_LATEST_RELEASE_ENDPOINT = f"https://api.github.com/repos/{GITHUB_USERNAME}/{GITHUB_REPO_NAME}/releases/latest"

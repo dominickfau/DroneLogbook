@@ -32,7 +32,7 @@ class ValidationResult:
         return False
 
 
-class Dialog(ABC, QtWidgets.QDialog):
+class Dialog(QtWidgets.QDialog):
     """Base class for all dialogs."""
 
     def __init__(self, title: str, parent: QtWidgets.QWidget = None):
@@ -413,8 +413,8 @@ class CreateDroneDialog(Dialog):
         self.drone_flight_controller_label = QtWidgets.QLabel("Flight Controller:")
         self.drone_flight_controller_combobox = QtWidgets.QComboBox()
         self.drone_flight_controller_combobox.addItem("")
-        flight_controller_type = models.EquipmentType.find_by_name("Remote Controller")
-        self.drone_flight_controller_combobox.addItems([flight_controller.combobox_name for flight_controller in models.Equipment.find_by_type(flight_controller_type)])
+        flight_controller_type = models.EquipmentType.find_by_name(self.session, "Remote Controller")
+        self.drone_flight_controller_combobox.addItems([flight_controller.combobox_name for flight_controller in models.Equipment.find_by_type(self.session, flight_controller_type)])
         self.drone_flight_controller_combobox.setCurrentIndex(0)
         self.drone_flight_controller_combobox.currentTextChanged.connect(self.set_flight_controller)
         self.drone_add_flight_controller_button = QtWidgets.QPushButton("Add")
@@ -440,12 +440,12 @@ class CreateDroneDialog(Dialog):
         self.drone_add_battery_button.setFixedWidth(75)
         self.drone_remove_battery_button = QtWidgets.QPushButton("Remove")
         self.drone_remove_battery_button.setEnabled(False)
-        self.drone_remove_battery_button.clicked.connect(self.remove_battery)
+        # self.drone_remove_battery_button.clicked.connect(self.remove_battery)
         self.drone_remove_battery_button.setFixedWidth(75)
 
         self.drone_geometry_label = QtWidgets.QLabel("Geometry:")
         self.drone_geometry_combobox = QtWidgets.QComboBox()
-        self.drone_geometry_combobox.addItems([geometry.name for geometry in models.DroneGeometry.find_all()])
+        self.drone_geometry_combobox.addItems([geometry.name for geometry in models.DroneGeometry.find_all(self.session)])
         self.drone_geometry_combobox.setCurrentIndex(1)
         self.drone_geometry_combobox.currentIndexChanged.connect(self.on_drone_geometry_combobox_changed)
         self.drone_geometry_image = QtWidgets.QLabel()
@@ -483,7 +483,8 @@ class CreateDroneDialog(Dialog):
         form_layout = QtWidgets.QFormLayout()
         form_layout.addRow(self.drone_geometry_label, self.drone_geometry_combobox)
         self.drone_geometry_layout.addLayout(form_layout)
-
+        
+        self.main_layout.addSpacing(10)
         self.main_layout.addLayout(self.drone_geometry_layout)
         self.main_layout.addWidget(self.drone_geometry_image, alignment=QtCore.Qt.AlignHCenter)
         self.main_layout.addWidget(self.drone_create_button)
@@ -556,7 +557,7 @@ class CreateDroneDialog(Dialog):
     
     def on_drone_geometry_combobox_changed(self, index: int) -> None:
         name = self.drone_geometry_combobox.itemText(index)
-        self.geometry = models.DroneGeometry.find_by_name(name) # type: models.DroneGeometry
+        self.geometry = models.DroneGeometry.find_by_name(self.session, name) # type: models.DroneGeometry
         if self.geometry is None: return
         image = self.geometry.image
         qimage = image.to_QImage()

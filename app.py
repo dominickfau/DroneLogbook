@@ -1,12 +1,21 @@
 import traceback
 import os
+import webbrowser
+import logging
+from typing import List
 from PyQt5 import QtCore, QtGui, QtWidgets
+from sqlalchemy.orm import Session
 
-from dronelogbook.mainwindow import Ui_MainWindow
 from dronelogbook import enums, errors, config, models, dialogs
+from dronelogbook.mainwindow import Ui_MainWindow
 from dronelogbook.dymo import DymoLabelPrinter
 from dronelogbook.customwidgets import SearchWidget
+from dronelogbook.database import DBContext
+from dronelogbook.defaultdata import load_default_data
+from dronelogbook.updater import check_for_updates
 
+
+logger = logging.getLogger("frontend")
 
 
 class MainWindow(Ui_MainWindow):
@@ -15,7 +24,7 @@ class MainWindow(Ui_MainWindow):
     def __init__(self, parent=None):
         super().__init__()
         self.setupUi(self)
-        self.setWindowTitle(f"{config.PROGRAM_NAME} v{config.VERSION}")
+        self.setWindowTitle(f"{config.PROGRAM_NAME} v{config.PROGRAM_VERSION}")
 
         self.drone_info_tabwidget.setEnabled(False)
         self.batteries_info_groupbox.setEnabled(False)
@@ -208,73 +217,76 @@ class MainWindow(Ui_MainWindow):
         self._populate_combobox(self.drone_status_combobox, enums.Airworthyness.all())
         self._populate_combobox(self.flight_controller_status_combobox, enums.Airworthyness.all())
         
-        
-        drones = database.global_session.query(database.Drone).all()
-        self._populate_combobox(self.search_flight_drone_combobox, [d.combobox_name for d in drones], add_blank=True)
-        self._populate_combobox(self.flight_drone_combobox, [d.combobox_name for d in drones])
+        with DBContext() as session:
+            drones = session.query(models.Drone).all()
+            self._populate_combobox(self.search_flight_drone_combobox, [d.combobox_name for d in drones], add_blank=True)
+            self._populate_combobox(self.flight_drone_combobox, [d.combobox_name for d in drones])
 
-        batteries = database.global_session.query(database.Battery).all()
-        self._populate_combobox(self.flight_battery_combobox, [b.combobox_name for b in batteries])
+            batteries = session.query(models.Battery).all()
+            self._populate_combobox(self.flight_battery_combobox, [b.combobox_name for b in batteries])
 
-        flight_types = database.global_session.query(database.FlightType).all()
-        self._populate_combobox(self.search_flight_type_combobox, [flight_type.name for flight_type in flight_types], add_blank=True)
-        self._populate_combobox(self.flight_type_combbox, [flight_type.name for flight_type in flight_types])
+            flight_types = session.query(models.FlightType).all()
+            self._populate_combobox(self.search_flight_type_combobox, [flight_type.name for flight_type in flight_types], add_blank=True)
+            self._populate_combobox(self.flight_type_combbox, [flight_type.name for flight_type in flight_types])
 
-        flight_statues = database.global_session.query(database.FlightStatus).order_by(database.FlightStatus.id).all()
-        self._populate_combobox(self.search_flight_status_combobox, [flight_status.name for flight_status in flight_statues], add_blank=True)
+            flight_statues = session.query(models.FlightStatus).order_by(models.FlightStatus.id).all()
+            self._populate_combobox(self.search_flight_status_combobox, [flight_status.name for flight_status in flight_statues], add_blank=True)
 
-        flight_operation_types = database.global_session.query(database.FlightOperationType).all()
-        self._populate_combobox(self.flight_operation_type_combobox, [flight_operation_type.name for flight_operation_type in flight_operation_types])
+            flight_operation_types = session.query(models.FlightOperationType).all()
+            self._populate_combobox(self.flight_operation_type_combobox, [flight_operation_type.name for flight_operation_type in flight_operation_types])
 
-        flight_operation_aprovals = database.global_session.query(database.FlightOperationApproval).all()
-        self._populate_combobox(self.flight_operation_aproval_type_combobox, [flight_operation_approval.name for flight_operation_approval in flight_operation_aprovals])
+            flight_operation_aprovals = session.query(models.FlightOperationApproval).all()
+            self._populate_combobox(self.flight_operation_aproval_type_combobox, [flight_operation_approval.name for flight_operation_approval in flight_operation_aprovals])
 
-        legal_rules = database.global_session.query(database.LegalRule).all()
-        self._populate_combobox(self.flight_legal_rule_combobox, [legal_rule.name for legal_rule in legal_rules])
+            legal_rules = session.query(models.LegalRule).all()
+            self._populate_combobox(self.flight_legal_rule_combobox, [legal_rule.name for legal_rule in legal_rules])
 
-        battery_chemistries = database.global_session.query(database.BatteryChemistry).all()
-        self._populate_combobox(self.search_battery_chemistry_combobox, [battery_chemistry.combobox_name for battery_chemistry in battery_chemistries], add_blank=True)
-        self._populate_combobox(self.battery_chemistry_combobox, [battery_chemistry.combobox_name for battery_chemistry in battery_chemistries])
+            battery_chemistries = session.query(models.BatteryChemistry).all()
+            self._populate_combobox(self.search_battery_chemistry_combobox, [battery_chemistry.combobox_name for battery_chemistry in battery_chemistries], add_blank=True)
+            self._populate_combobox(self.battery_chemistry_combobox, [battery_chemistry.combobox_name for battery_chemistry in battery_chemistries])
 
-        self._populate_combobox(self.search_equipment_status_combobox, database.Airworthyness.all(), add_blank=True)
-        self._populate_combobox(self.equipment_status_combobox, database.Airworthyness.all())
+            self._populate_combobox(self.search_equipment_status_combobox, enums.Airworthyness.all(), add_blank=True)
+            self._populate_combobox(self.equipment_status_combobox, enums.Airworthyness.all())
 
-        equipment_types = database.global_session.query(database.EquipmentType).all()
-        self._populate_combobox(self.search_equipment_type_combobox, [equipment_type.name for equipment_type in equipment_types], add_blank=True)
-        self._populate_combobox(self.equipment_type_combobox, [equipment_type.name for equipment_type in equipment_types])
+            equipment_types = session.query(models.EquipmentType).all()
+            self._populate_combobox(self.search_equipment_type_combobox, [equipment_type.name for equipment_type in equipment_types], add_blank=True)
+            self._populate_combobox(self.equipment_type_combobox, [equipment_type.name for equipment_type in equipment_types])
 
-        flight_controllers = database.global_session.query(database.FlightController).all()
-        self._populate_combobox(self.drone_flight_controller_combobox, [flight_controller.combobox_name for flight_controller in flight_controllers])
-        
-        self.drone_geometry_combobox.addItems([geometry.name for geometry in database.DroneGeometry.find_all()])
+            flight_controllers = models.Equipment.find_by_type(session, models.EquipmentType.find_by_name(session, "Remote Controller"))
+            self._populate_combobox(self.drone_flight_controller_combobox, [flight_controller.combobox_name for flight_controller in flight_controllers])
+            
+            self.drone_geometry_combobox.addItems([geometry.name for geometry in models.DroneGeometry.find_all(session)])
+
+            session.expunge_all()
 
         self.reload_all_search_tables()
 
     def reload_all_search_tables(self) -> None:
         """Reloads all search tables."""
 
-        # Inventory tab.
-        self.reload_drone_search_table()
-        self.reload_battery_search_table()
+        with DBContext() as session:
+            # Inventory tab.
+            self.reload_drone_search_table(session)
+            self.reload_battery_search_table(session)
 
-        # Flight tab.
-        self.reload_flight_search_table()
+            # Flight tab.
+            self.reload_flight_search_table(session)
 
-        # Equipment tab.
-        self.reload_equipment_search_table()
+            # Equipment tab.
+            self.reload_equipment_search_table(session)
 
-        # Flight Controller tab.
-        self.reload_flight_controller_search_table()
+            # Flight Controller tab.
+            self.reload_flight_controller_search_table(session)
     
-    def reload_drone_search_table(self, search_criteria=None) -> None:
+    def reload_drone_search_table(self, session: Session, search_criteria=None) -> None:
         """Reloads the drone search table."""
         self.drone_search_results = [] # type: list[models.Drone]
 
         # TODO: Implement search criteria.
         if search_criteria:
-            self.drone_search_results = database.global_session.query(database.Drone).all()
+            self.drone_search_results = session.query(models.Drone).all()
         else:
-            self.drone_search_results = database.global_session.query(database.Drone).all()
+            self.drone_search_results = session.query(models.Drone).all()
         
         data = []
         for drone in self.drone_search_results:
@@ -287,17 +299,18 @@ class MainWindow(Ui_MainWindow):
             data.append(row)
 
         self.drone_search_widget.set_record_data(data)
+        session.expunge_all()
     
-    def reload_battery_search_table(self, search_criteria=None) -> None:
+    def reload_battery_search_table(self, session: Session, search_criteria=None) -> None:
         """Reloads the battery search table."""
 
         # TODO: Implement search criteria.
         self.battery_search_results = [] # type: List[models.Battery]
 
         if search_criteria:
-            self.battery_search_results = database.global_session.query(database.Battery).all()
+            self.battery_search_results = session.query(models.Battery).all()
         else:
-            self.battery_search_results = database.global_session.query(database.Battery).all()
+            self.battery_search_results = session.query(models.Battery).all()
         
         data = []
         for battery in self.battery_search_results:
@@ -309,16 +322,17 @@ class MainWindow(Ui_MainWindow):
             data.append(row)
 
         self.battery_search_widget.set_record_data(data)
+        session.expunge_all()
     
-    def reload_flight_search_table(self, search_criteria=None) -> None:
+    def reload_flight_search_table(self, session: Session, search_criteria=None) -> None:
         """Reloads the flight search table."""
         self.flight_search_results = [] # type: List[models.Flight]
 
         # TODO: Implement search criteria.
         if search_criteria:
-            self.flight_search_results = database.global_session.query(database.Flight).all()
+            self.flight_search_results = session.query(models.Flight).all()
         else:
-            self.flight_search_results = database.global_session.query(database.Flight).filter(database.Flight.active == True).all()
+            self.flight_search_results = session.query(models.Flight).filter(models.Flight.active == True).all()
         
         data = []
         for flight in self.flight_search_results:
@@ -330,16 +344,17 @@ class MainWindow(Ui_MainWindow):
             data.append(row)
 
         self.flight_search_widget.set_record_data(data)
+        session.expunge_all()
     
-    def reload_equipment_search_table(self, search_criteria=None) -> None:
+    def reload_equipment_search_table(self, session: Session, search_criteria=None) -> None:
         """Reloads the equipment search table."""
         self.equipment_search_results = [] # type: List[models.Equipment]
 
         # TODO: Implement search criteria.
         if search_criteria:
-            self.equipment_search_results = database.global_session.query(database.Equipment).all()
+            self.equipment_search_results = session.query(models.Equipment).all()
         else:
-            self.equipment_search_results = database.global_session.query(database.Equipment).all()
+            self.equipment_search_results = session.query(models.Equipment).all()
         
         data = []
         for item in self.equipment_search_results:
@@ -352,16 +367,17 @@ class MainWindow(Ui_MainWindow):
             data.append(row)
         
         self.equipment_search_widget.set_record_data(data)
+        session.expunge_all()
     
-    def reload_flight_controller_search_table(self, search_criteria=None) -> None:
+    def reload_flight_controller_search_table(self, session: Session, search_criteria=None) -> None:
         """Reloads the flight controller search table."""
         self.flight_controller_search_results = []
 
         # TODO: Implement search criteria.
         if search_criteria:
-            self.flight_controller_search_results = database.global_session.query(database.FlightController).all()
+            self.flight_controller_search_results = models.Equipment.find_by_type(session, models.EquipmentType.find_by_name(session, "Remote Controller"))
         else:
-            self.flight_controller_search_results = database.global_session.query(database.FlightController).all()
+            self.flight_controller_search_results = models.Equipment.find_by_type(session, models.EquipmentType.find_by_name(session, "Remote Controller"))
         
         data = []
         for flight_controller in self.flight_controller_search_results:
@@ -372,17 +388,20 @@ class MainWindow(Ui_MainWindow):
             data.append(row)
         
         self.flight_controller_search_widget.set_record_data(data)
+        session.expunge_all()
     
-    def reload_flight_equipment_table(self, flight: models.Flight):
+    def reload_flight_equipment_table(self, session: Session, flight: models.Flight):
         """Reloads the flight equipment table."""
         self.flight_equipment_table.setRowCount(0)
-        for equipment_to_flight in flight.used_equipment:
+        flight = session.query(models.Flight).filter_by(id=flight.id).first()
+
+        for equipment in flight.used_equipment:
             self.flight_equipment_table.insertRow(self.flight_equipment_table.rowCount())
-            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 0, QtWidgets.QTableWidgetItem(equipment_to_flight.equipment.serial_number))
-            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 1, QtWidgets.QTableWidgetItem(equipment_to_flight.equipment.name))
-            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 2, QtWidgets.QTableWidgetItem(equipment_to_flight.equipment.description))
-            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 3, QtWidgets.QTableWidgetItem(equipment_to_flight.equipment.type_.name))
-            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 4, QtWidgets.QTableWidgetItem(equipment_to_flight.equipment.status))
+            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 0, QtWidgets.QTableWidgetItem(equipment.serial_number))
+            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 1, QtWidgets.QTableWidgetItem(equipment.name))
+            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 2, QtWidgets.QTableWidgetItem(equipment.description))
+            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 3, QtWidgets.QTableWidgetItem(equipment.type_.name))
+            self.flight_equipment_table.setItem(self.flight_equipment_table.rowCount() - 1, 4, QtWidgets.QTableWidgetItem(equipment.status))
 
         # self.flight_equipment_table.resizeColumnsToContents()
 
@@ -392,16 +411,18 @@ class MainWindow(Ui_MainWindow):
         else:
             self.flight_equipment_edit_button.setEnabled(True)
             self.flight_equipment_remove_button.setEnabled(True)
+        session.expunge_all()
     
-    def reload_drone_batteries_table(self, drone: models.Drone):
+    def reload_drone_batteries_table(self, session: Session, drone: models.Drone):
         """Reloads the drone linked batteries table"""
         self.drone_batteries_table.setRowCount(0)
-        for battery_to_drone in drone.batteries:
-            battery = battery_to_drone.battery
+        drone = session.query(models.Drone).filter_by(id=drone.id)
+
+        for battery in drone.batteries:
             self.drone_batteries_table.insertRow(self.drone_batteries_table.rowCount())
             self.drone_batteries_table.setItem(self.drone_batteries_table.rowCount() - 1, 0, QtWidgets.QTableWidgetItem(battery.serial_number))
             self.drone_batteries_table.setItem(self.drone_batteries_table.rowCount() - 1, 1, QtWidgets.QTableWidgetItem(battery.name))
-            self.drone_batteries_table.setItem(self.drone_batteries_table.rowCount() - 1, 2, QtWidgets.QTableWidgetItem(battery.purchase_date.strftime("%Y-%m-%d")))
+            self.drone_batteries_table.setItem(self.drone_batteries_table.rowCount() - 1, 2, QtWidgets.QTableWidgetItem(battery.purchase_date.strftime(config.DATE_FORMAT)))
             self.drone_batteries_table.setItem(self.drone_batteries_table.rowCount() - 1, 3, QtWidgets.QTableWidgetItem(battery.status))
 
         if len(drone.batteries) == 0:
@@ -410,6 +431,7 @@ class MainWindow(Ui_MainWindow):
         else:
             self.drone_battery_edit_button.setEnabled(True)
             self.drone_battery_remove_button.setEnabled(True)
+        session.expunge_all()
 
     def _populate_combobox(self, combo_box: QtWidgets.QComboBox, data_list: list, add_blank=False) -> None:
         """Populates a combo box with data from a list."""
@@ -613,14 +635,16 @@ class MainWindow(Ui_MainWindow):
         self.settings.endGroup()
 
     def on_drone_geometry_combobox_changed(self, index: int) -> None:
-        name = self.drone_geometry_combobox.itemText(index)
-        self.geometry = models.DroneGeometry.find_by_name(name) # type: models.DroneGeometry
-        if self.geometry is None: return
-        image = self.geometry.image
-        qimage = image.to_QImage()
-        qimage = qimage.scaled(config.THUMBNAIL_WIDTH, config.THUMBNAIL_HEIGHT, QtCore.Qt.KeepAspectRatio) # Scale the image
-        pixmap = QtGui.QPixmap.fromImage(qimage)
-        self.drone_geometry_image.setPixmap(pixmap)
+        with DBContext() as session:
+            name = self.drone_geometry_combobox.itemText(index)
+            self.geometry = models.DroneGeometry.find_by_name(session, name) # type: models.DroneGeometry
+            if self.geometry is None: return
+            image = self.geometry.image
+            qimage = image.to_QImage()
+            qimage = qimage.scaled(config.THUMBNAIL_WIDTH, config.THUMBNAIL_HEIGHT, QtCore.Qt.KeepAspectRatio) # Scale the image
+            pixmap = QtGui.QPixmap.fromImage(qimage)
+            self.drone_geometry_image.setPixmap(pixmap)
+            session.expunge_all()
 
     def on_drone_battery_create_new_button_clicked(self) -> None:
         drone_battery_dialog = dialogs.CreateBatteryDialog(self)
@@ -647,17 +671,17 @@ class MainWindow(Ui_MainWindow):
     def on_drone_battery_remove_button_clicked(self) -> None:
         index = self.drone_batteries_table.currentRow()
         if index < 0: return
-        selected_battery = self.selected_drone.batteries[index].battery
+        selected_battery = self.selected_drone.batteries[index]
         try:
             self.selected_drone.remove_battery(selected_battery)
-        except database.BatteryRemoveError as e:
+        except errors.BatteryRemoveError as e:
             self.show_error(e)
         self.reload_drone_batteries_table(self.selected_drone)
 
     def on_drone_batteries_table_item_double_clicked(self, item: QtWidgets.QTableWidgetItem) -> None:
         index = self.drone_batteries_table.currentRow()
         if index < 0: return
-        selected_battery = self.selected_drone.batteries[index].battery
+        selected_battery = self.selected_drone.batteries[index]
         self.reload_drone_battery_form(selected_battery)
 
     def on_flight_equipment_add_button_clicked(self) -> None:
@@ -666,7 +690,7 @@ class MainWindow(Ui_MainWindow):
         self.reload_flight_equipment_table(self.selected_flight)
     
     def on_flight_equipment_edit_button_clicked(self) -> None:
-        selected_equipment = self.selected_flight.used_equipment[self.flight_equipment_table.currentRow()].equipment
+        selected_equipment = self.selected_flight.used_equipment[self.flight_equipment_table.currentRow()]
         equipment_dialog = dialogs.SelectFlightEquipmentDialog(flight=self.selected_flight, equipment=selected_equipment)
         equipment_dialog.exec()
         self.reload_flight_equipment_table(self.selected_flight)
@@ -674,7 +698,7 @@ class MainWindow(Ui_MainWindow):
     def on_flight_equipment_remove_button_clicked(self) -> None:
         index = self.flight_equipment_table.currentRow()
         if index < 0: return
-        selected_equipment = self.selected_flight.used_equipment[index].equipment
+        selected_equipment = self.selected_flight.used_equipment[index]
         self.selected_flight.remove_equipment(selected_equipment)
 
         if len(self.selected_flight.used_equipment) == 0:
@@ -688,7 +712,7 @@ class MainWindow(Ui_MainWindow):
 
         try:
             self.label_printer.register_label_file(self.inventory_label_file_path)
-        except SetLabelFileError as error:
+        except errors.SetLabelFileError as error:
             self.show_error(error)
             return
         self.label_printer.set_field("barcode_upper_left", label_value)
@@ -845,7 +869,7 @@ class MainWindow(Ui_MainWindow):
         flight = self.flight_search_results[row]
         self.reload_flight_form(flight)
 
-    def reload_drone_form(self, drone: database.Drone):
+    def reload_drone_form(self, drone: models.Drone):
         """Reloads the drone form with the ginven drone."""
         self.selected_drone = drone
 
@@ -862,7 +886,7 @@ class MainWindow(Ui_MainWindow):
         if config.LABEL_PRINTING_ENABLED:
             self.drone_print_inventory_label_button.setEnabled(True)
 
-        self.selected_drone_battery = drone.batteries[0].battery
+        self.selected_drone_battery = drone.batteries[0]
 
         # General tab
         self.drone_name_line_edit.setText(drone.name)
@@ -873,10 +897,10 @@ class MainWindow(Ui_MainWindow):
         self.drone_flight_controller_combobox.setCurrentText(drone.flight_controller.combobox_name)
 
         # Details tab
-        self.drone_date_created_value.setText(drone.date_created.strftime("%Y-%m-%d"))
-        self.drone_date_modified_value.setText(drone.date_modified.strftime("%Y-%m-%d"))
+        # self.drone_date_created_value.setText(drone.date_created.strftime("%Y-%m-%d"))
+        # self.drone_date_modified_value.setText(drone.date_modified.strftime("%Y-%m-%d"))
         self.drone_color_line_edit.setText(drone.color)
-        self.drone_item_value_spinbox.setValue(drone.item_value)
+        self.drone_item_value_spinbox.setValue(drone.price)
         self.drone_date_purchased_date_edit.setDate(QtCore.QDate.fromString(drone.purchase_date.strftime("%Y-%m-%d"), "yyyy-MM-dd"))
         self.drone_max_speed_spinbox.setValue(drone.max_speed)
         self.drone_max_vertical_speed_spinbox.setValue(drone.max_vertical_speed)
@@ -889,7 +913,7 @@ class MainWindow(Ui_MainWindow):
         self.reload_drone_batteries_table(drone)
         self.reload_drone_battery_form(self.selected_drone_battery)
 
-    def reload_drone_battery_form(self, battery: database.Battery):
+    def reload_drone_battery_form(self, battery: models.Battery):
         """Reloads the drone battery form with the given battery"""
         self.selected_drone_battery = battery
 
@@ -906,10 +930,10 @@ class MainWindow(Ui_MainWindow):
         self.drone_battery_max_charge_cycles_spinbox.setValue(battery.max_charge_cycles)
         self.drone_battery_max_flight_spinbox.setValue(battery.max_flights)
         self.drone_battery_weight_spinbox.setValue(battery.weight)
-        self.drone_battery_item_value_spinbox.setValue(battery.item_value)
+        self.drone_battery_item_value_spinbox.setValue(battery.price)
         self.drone_battery_date_purchased_date_edit.setDate(QtCore.QDate.fromString(battery.purchase_date.strftime("%Y-%m-%d"), "yyyy-MM-dd"))
 
-    def reload_battery_form(self, battery: database.Battery):
+    def reload_battery_form(self, battery: models.Battery):
         """Reloads the battery form with the given battery."""
         self.selected_battery = battery
 
@@ -925,8 +949,8 @@ class MainWindow(Ui_MainWindow):
         if config.LABEL_PRINTING_ENABLED:
             self.battery_print_inventory_label_button.setEnabled(True)
 
-        self.battery_date_created_value.setText(battery.date_created.strftime("%Y-%m-%d"))
-        self.battery_date_modified_value.setText(battery.date_modified.strftime("%Y-%m-%d"))
+        # self.battery_date_created_value.setText(battery.date_created.strftime("%Y-%m-%d"))
+        # self.battery_date_modified_value.setText(battery.date_modified.strftime("%Y-%m-%d"))
         self.battery_age_value.setText(str(battery.age) + " yrs")
         self.battery_total_flights_value.setText(str(battery.total_flights))
         self.battery_total_flight_time_value.setText(str(round(battery.total_flight_time / 60, 2))) # Show in hours
@@ -949,7 +973,7 @@ class MainWindow(Ui_MainWindow):
         self.battery_serial_number_line_edit.setText(battery.serial_number)
         self.battery_name_line_edit.setText(battery.name)
         self.battery_chemistry_combobox.setCurrentText(battery.chemistry.combobox_name)
-        self.battery_item_value_spinbox.setValue(battery.item_value)
+        self.battery_item_value_spinbox.setValue(battery.price)
         self.battery_date_purchased_date_edit.setDate(QtCore.QDate.fromString(battery.purchase_date.strftime("%Y-%m-%d"), "yyyy-MM-dd"))
 
         if battery.notes:
@@ -957,7 +981,7 @@ class MainWindow(Ui_MainWindow):
         else:
             self.battery_notes_plain_text_edit.setPlainText("")
     
-    def reload_equipment_form(self, equipment: database.Equipment):
+    def reload_equipment_form(self, equipment: models.Equipment):
         """Reloads the equipment form with the given equipment."""
         self.selected_equipment = equipment
 
@@ -972,8 +996,8 @@ class MainWindow(Ui_MainWindow):
         if config.LABEL_PRINTING_ENABLED:
             self.equipment_print_inventory_label_button.setEnabled(True)
         
-        self.equipment_date_created_value.setText(equipment.date_created.strftime("%Y-%m-%d"))
-        self.equipment_date_modified_value.setText(equipment.date_modified.strftime("%Y-%m-%d"))
+        # self.equipment_date_created_value.setText(equipment.date_created.strftime("%Y-%m-%d"))
+        # self.equipment_date_modified_value.setText(equipment.date_modified.strftime("%Y-%m-%d"))
 
         self.equipment_serial_number_line_edit.setText(equipment.serial_number)
         self.equipment_name_line_edit.setText(equipment.name)
@@ -982,11 +1006,11 @@ class MainWindow(Ui_MainWindow):
         self.equipment_status_combobox.setCurrentText(equipment.status)
         self.equipment_weight_spinbox.setValue(equipment.weight)
         self.equipment_date_purchased_date_edit.setDate(QtCore.QDate.fromString(equipment.purchase_date.strftime("%Y-%m-%d"), "yyyy-MM-dd"))
-        self.equipment_item_value_spinbox.setValue(equipment.item_value)
+        self.equipment_item_value_spinbox.setValue(equipment.price)
         self.equipmen_total_flights_value.setText(str(equipment.total_flights))
         self.equipmen_total_flight_time_value.setText(str(round(equipment.total_flight_time / 60, 2))) # Show in hours
     
-    def reload_flight_controller_form(self, flight_controller: database.FlightController):
+    def reload_flight_controller_form(self, flight_controller: models.Equipment):
         """Reloads the flight controller for with the given flight controller."""
         self.selected_flight_controller = flight_controller
 
@@ -1002,8 +1026,8 @@ class MainWindow(Ui_MainWindow):
         if config.LABEL_PRINTING_ENABLED:
             self.flight_controller_print_inventory_label_button.setEnabled(True)
 
-        self.flight_controller_date_created_value.setText(flight_controller.date_created.strftime("%Y-%m-%d"))
-        self.flight_controller_date_modified_value.setText(flight_controller.date_modified.strftime("%Y-%m-%d"))
+        # self.flight_controller_date_created_value.setText(flight_controller.date_created.strftime("%Y-%m-%d"))
+        # self.flight_controller_date_modified_value.setText(flight_controller.date_modified.strftime("%Y-%m-%d"))
         self.flight_controller_age_value.setText(str(flight_controller.age) + " yrs")
         self.flight_controller_total_flights_value.setText(str(flight_controller.total_flights))
         self.flight_controller_total_flight_time_value.setText(str(round(flight_controller.total_flight_time / 60, 2)))
@@ -1019,9 +1043,9 @@ class MainWindow(Ui_MainWindow):
         self.flight_controller_name_line_edit.setText(flight_controller.name)
         self.flight_controller_status_combobox.setCurrentText(flight_controller.status)
         self.flight_controller_date_purchased_date_edit.setDate(QtCore.QDate.fromString(flight_controller.purchase_date.strftime("%Y-%m-%d"), "yyyy-MM-dd"))
-        self.flight_controller_item_value_spinbox.setValue(flight_controller.item_value)
+        self.flight_controller_item_value_spinbox.setValue(flight_controller.price)
     
-    def reload_flight_form(self, flight: database.Flight):
+    def reload_flight_form(self, flight: models.Flight):
         """Reloads the flight form with the given flight."""
         self.selected_flight = flight
 
@@ -1121,17 +1145,18 @@ class MainWindow(Ui_MainWindow):
         """Opens a dialog box with information about the application."""
         message_box = QtWidgets.QMessageBox()
         message_box.setWindowTitle("About")
-        message_box.setText(f"{PROGRAM_NAME} - Version {VERSION}")
+        message_box.setText(f"{config.PROGRAM_NAME} - Version {config.PROGRAM_VERSION}")
         message_box.setStandardButtons(QtWidgets.QMessageBox.Ok)
         message_box.exec_()
     
     def add_drone(self) -> None:
         """Opens a dialog box to add a new drone."""
-        dialog = dialogs.AddDroneDialog(self)
-        dialog.exec()
-        if dialog.drone is None: return
-        self.reload_drone_search_table()
-        self.reload_drone_form(dialog.drone)
+        with DBContext() as session:
+            dialog = dialogs.CreateDroneDialog(session, self)
+            dialog.exec()
+            if dialog.drone is None: return
+            self.reload_drone_search_table()
+            self.reload_drone_form(dialog.drone)
 
     def add_battery(self) -> None:
         """Opens a dialog box to add a new battery."""
@@ -1198,7 +1223,7 @@ class MainWindow(Ui_MainWindow):
             self.selected_drone.delete()
             self.reload_drone_form(None)
             self.reload_drone_search_table()
-        except database.Error as e:
+        except errors.Error as e:
             self.show_error(e)
             return
 
@@ -1219,7 +1244,7 @@ class MainWindow(Ui_MainWindow):
             self.selected_battery.delete()
             self.reload_battery_form(None)
             self.reload_battery_search_table()
-        except database.Error as e:
+        except errors.Error as e:
             self.show_error(e)
             return
 
@@ -1239,7 +1264,7 @@ class MainWindow(Ui_MainWindow):
             self.selected_equipment.delete()
             self.reload_equipment_form(None)
             self.reload_equipment_search_table()
-        except database.Error as e:
+        except errors.Error as e:
             self.show_error(e)
             return
 
@@ -1259,7 +1284,7 @@ class MainWindow(Ui_MainWindow):
             self.selected_flight_controller.delete()
             self.reload_flight_controller_form(None)
             self.reload_flight_controller_search_table()
-        except database.Error as e:
+        except errors.Error as e:
             self.show_error(e)
             return
     
@@ -1280,7 +1305,7 @@ class MainWindow(Ui_MainWindow):
             self.selected_flight.delete()
             self.reload_flight_form(None)
             self.reload_flight_search_table()
-        except database.Error as e:
+        except errors.Error as e:
             self.show_error(e)
             return
 
@@ -1394,8 +1419,125 @@ class Application(QtWidgets.QApplication):
         self.splash.loading()
         
 
+def show_new_release_dialog(version: str, html_url: str):
+    dialog = QtWidgets.QMessageBox()
+    dialog.setWindowTitle("New release available")
+    dialog.setText(f"New release available: {version}")
+    dialog.setInformativeText("Would you like to open the download page?")
+    dialog.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+    dialog.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Yes)
+    dialog.setIcon(QtWidgets.QMessageBox.Icon.Information)
+    if dialog.exec() == QtWidgets.QMessageBox.StandardButton.No:
+        return
+
+    # Open an internet browser to download the release
+    try:
+        webbrowser.open(html_url)
+    except Exception as e:
+        logger.exception(f"Failed to open browser to download release.")
+        QtWidgets.QMessageBox.critical(None, "Error", f"Could not open browser: {e}")
+
+
+def prompt_user(skip_check: bool=False):
+        if not skip_check and not (config.DATABASE_USER.value == ""\
+            or config.DATABASE_PASSWORD.value == ""\
+            or config.DATABASE_HOST.value == ""\
+            or config.DATABASE_PORT.value == ""):
+            return
+
+        logger.warning("Missing required registry key values. Prompting user to enter data.")
+        
+        dialog = QtWidgets.QDialog()
+        dialog.setWindowTitle("Missing Required Data")
+        v_layout = QtWidgets.QVBoxLayout()
+        dialog.setLayout(v_layout)
+        username_lineEdit = QtWidgets.QLineEdit()
+        password_lineEdit = QtWidgets.QLineEdit()
+        host_lineEdit = QtWidgets.QLineEdit()
+        port_spinBox = QtWidgets.QSpinBox()
+
+        password_lineEdit.setEchoMode(QtWidgets.QLineEdit.EchoMode.PasswordEchoOnEdit)
+        port_spinBox.setButtonSymbols(QtWidgets.QSpinBox.ButtonSymbols.NoButtons)
+        port_spinBox.setMinimum(1024)
+        port_spinBox.setMaximum(65535)
+
+        username_lineEdit.editingFinished.connect(lambda: username_lineEdit.setText(username_lineEdit.text().strip()))
+        password_lineEdit.editingFinished.connect(lambda: password_lineEdit.setText(password_lineEdit.text().strip()))
+        host_lineEdit.editingFinished.connect(lambda: host_lineEdit.setText(host_lineEdit.text().strip()))
+
+        info_label = QtWidgets.QLabel(f"Please fill in the missing MySQL database authentication info.\n\nAll settings are stored in the registry at: '{config.DATABASE_USER.base_hive_location}'")
+
+        v_layout.addWidget(info_label)
+        form_layout = QtWidgets.QFormLayout()
+        form_layout.addRow(QtWidgets.QLabel("Username:"), username_lineEdit)
+        form_layout.addRow(QtWidgets.QLabel("Password:"), password_lineEdit)
+        form_layout.addRow(QtWidgets.QLabel("Host:"), host_lineEdit)
+        form_layout.addRow(QtWidgets.QLabel("Port:"), port_spinBox)
+        v_layout.addSpacing(10)
+        v_layout.addLayout(form_layout)
+        button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Save | QtWidgets.QDialogButtonBox.StandardButton.Close)
+        v_layout.addWidget(button_box)
+
+        username_lineEdit.setText(config.DATABASE_USER.value)
+        password_lineEdit.setText(config.DATABASE_PASSWORD.value)
+        host_lineEdit.setText(config.DATABASE_HOST.value)
+        port_spinBox.setValue(int(config.DATABASE_PORT.value))
+
+        def on_accept():
+            config.DATABASE_USER.value = username_lineEdit.text()
+            config.DATABASE_PASSWORD.value = password_lineEdit.text()
+            config.DATABASE_HOST.value = host_lineEdit.text()
+            config.DATABASE_PORT.value = str(port_spinBox.text())
+
+            config.DATABASE_USER.save()
+            config.DATABASE_PASSWORD.save()
+            config.DATABASE_HOST.save()
+            config.DATABASE_PORT.save()
+
+            if config.DATABASE_USER.value == ""\
+                or config.DATABASE_PASSWORD.value == ""\
+                or config.DATABASE_HOST.value == ""\
+                or config.DATABASE_PORT.value == "":
+                QtWidgets.QMessageBox.warning(dialog, "Warning", "Please fill in all blank fields.")
+                return
+
+            dialog.accept()
+
+        def on_reject():
+            dialog.reject()
+
+        button_box.accepted.connect(on_accept)
+        button_box.rejected.connect(on_reject)
+
+        result = dialog.exec()
+        if result == 0:
+            logger.warning("User did not set missing required database info. The program can not continue.")
+            QtWidgets.QMessageBox.warning(dialog, "Error", "Missing required database info. The program can not continue.")
+            exit(0)
+        else:
+            logger.info("Missing required database info saved. Application restart required to apply changes.")
+            QtWidgets.QMessageBox.warning(dialog, "Error", "Missing required database info saved. Application restart required to apply changes.\n\nProgram will close after this dialog closes.")
+            exit(0)
+
+
+
 
 if __name__ == "__main__":
-    database.force_recreate()
+    newer, version, url = check_for_updates()
+    if newer:
+        show_new_release_dialog(version, url)
+
+    prompt_user()
+
+    try:
+        models.create_database()
+    except Exception as error:
+        logger.exception("Could not create database.")
+        QtWidgets.QMessageBox.warning(None, "Error", "There was an issue connecting to the database. Check database authentication settings.")
+        prompt_user(skip_check=True)
+        exit(0)
+
+    models.create_database()
+    load_default_data()
     app = Application([])
     app.exec_()

@@ -4,7 +4,6 @@ import string
 from PyQt5.QtWidgets import QLineEdit
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm.session import Session
-from sqlalchemy.orm.decl_api import _DeclarativeBase
 
 
 def clean_text_input(widget: QLineEdit):
@@ -12,11 +11,11 @@ def clean_text_input(widget: QLineEdit):
     widget.setText(widget.text().strip())
 
 
-def generate_random_string(check_table: _DeclarativeBase, limit=13) -> str:
+def generate_random_string(check_table, limit=13) -> str:
     """Generates a unique random string. To be used in the database.
 
     Args:
-        check_table (_DeclarativeBase): The SQLAlchemy table class to generate for.
+        check_table (DeclarativeBase): The SQLAlchemy table class to generate for.
         limit (int, optional): Limit string length to this amount. Defaults to 13.
 
     Returns:
@@ -28,13 +27,13 @@ def generate_random_string(check_table: _DeclarativeBase, limit=13) -> str:
     return string_
 
 
-def check_random_sting(session: Session, string: str, table_: _DeclarativeBase) -> bool:
+def check_random_sting(session: Session, string: str, table_) -> bool:
     """Checks if the givin string exists in the serial_number column of the table_.
 
     Args:
         session (Session): The session to use.
         string (str): The string to look for.
-        table_ (_DeclarativeBase): The table class to search in.
+        table_ (DeclarativeBase): The table class to search in.
 
     Returns:
         bool: Returns True if string is unique.
